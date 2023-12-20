@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+
+# uses script git-latest-tag
+
+import urllib.request
+import ssl
+
+
+import xml.etree.ElementTree as ET
+import sys
+from pathlib import Path
+
+
+jetbrains_path = Path.home() / 'Library/Application Support/JetBrains/'
+
+
+def parse_args():
+	"""
+	possible args:
+	- duckdb-jetbrains # no args: run the shell script `git-latest-tag duckb/duckdb` to get the latest version
+	- duckdb-jetbrains {version} # 1 arg: it's the version e.g. 0.8.1
+	- duckdb-jetbrains {path_to_xml} {version}
+
+	If it's just one arg, path_to_xml is "$HOME/Library/Application Support/JetBrains/GoLand2023.1/jdbc-drivers/jdbc-drivers.xml"
+	use pathlib to get the home directory
+	"""
+
+	jetbrains_path = Path.home() / 'Library/Application Support/JetBrains/'
+	# TODO: lazy approach, can be improved
+	xml_path = [x for x in jetbrains_path.glob('**/jdbc-drivers.xml')][0]
+	print(f'{xml_path}\n')
+
+	if len(sys.argv) == 1:
+		# Run the shell script `git-latest-tag duckb/duckdb` to get the latest version
+		from subprocess import run, PIPE
+
+		version = run(['git-latest-tag', 'duckdb/duckdb'], stdout=PIPE, encoding='utf-8').stdout.strip()
+	if len(sys.argv) == 2:
+		version = sys.argv[1]
+	if len(sys.argv) == 3:
+		xml_path = sys.argv[1]
+		version = sys.argv[2]
+
+	return xml_path, version
+
+
+def add_version_to_xml(xml_path, new_version):
+	# Load the XML tree and get the root
+	tree = ET.parse(xml_path)
+	root = tree.getroot()
+
+	# Find the DuckDB artifact
+	duckdb = None
+	for artifact in root.findall('artifact'):
+		if artifact.get('name') == 'DuckDB':
+			duckdb = artifact
+			break
+
+	if not duckdb:
+		print('DuckDB section not found (no artifact for DuckDB).')
+		return False
+	# don't insert if version is already there
+	for version in duckdb.findall('version'):
+		if version.get('version') == new_version:
+			print(f'Version {new_version} already exists in xml')
+			return False
+
+	# Create the version XML as string and parse it
+	version_xml = f"""
+	<version version="{new_version}">
+			<item type="maven" url="org.duckdb:duckdb_jdbc:{new_version}"/>
+			<item type="license" url="https://download.jetbrains.com/idea/jdbc-drivers/DuckDB/LICENSE.txt"/>
+	</version>
+	"""
+	version_element = ET.fromstring(version_xml.strip())
+	duckdb.append(version_element)
+	if duckdb[-1].tail is None:
+		duckdb[-1].tail = '\n'
+	else:
+		duckdb[-1].tail = duckdb[-1].tail.rstrip() + '\n'
+	tree.write(xml_path)
+	return True
+
+
+def download_jar(version, ide='GoLand'):
+	# curl -O https://repo.maven.apache.org/maven2/org/duckdb/duckdb_jdbc/0.9.1/duckdb_jdbc-0.9.1.jar
+	jar_tree = f'org/duckdb/duckdb_jdbc/{version}'
+	file_name = f'duckdb_jdbc-{version}.jar'
+	url = f'https://repo.maven.apache.org/maven2/{jar_tree}/{file_name}'
+	print(url)
+
+	# get latest version of ide withing the jetbrains path
+	ide_path = sorted([x for x in jetbrains_path.glob(f'**/{ide}*')], reverse=True)[0]
+
+	# download jar and save it to the same directory as the xml file
+	jar_dir = Path(ide_path / 'jdbc-drivers/Duckdb' / version / jar_tree)
+	jar_dir.mkdir(parents=True, exist_ok=True)
+
+	jar_filepath = jar_dir / file_name
+	with open(jar_filepath, 'wb') as f:
+		ssl_context = ssl.create_default_context()
+		ssl_context.check_hostname = False
+		ssl_context.verify_mode = ssl.CERT_NONE
+		print('⬇️ Downloading…')
+		with urllib.request.urlopen(url, context=ssl_context) as response, open(
+			jar_filepath, 'wb'
+		) as out_file:
+			data = response.read()  # Read the entire content of the file
+			out_file.write(data)
+
+	# print the path to the jar file and its filesize in MB
+	print(f'✅ {jar_filepath.stat().st_size / 1024**2:.2f} MB\t{jar_filepath}\n')
+
+
+if __name__ == '__main__':
+	xml_path, version = parse_args()
+
+	if add_version_to_xml(xml_path, version) is True:
+		print(f'+ {version}')
+
+	download_jar(version)
