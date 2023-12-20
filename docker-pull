@@ -1,0 +1,6 @@
+#!/bin/zsh
+compose_files=(**/docker-compose.(yml|yaml)(.N))
+
+# build out list of `-f <file> -f <file>...`
+compose_cmds="${${compose_files[@]/#/-f }[*]}"
+eval "docker-compose ${compose_cmds} pull"
