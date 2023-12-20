@@ -1,0 +1,13 @@
+#!/usr/bin/env zsh
+
+ffprobe -loglevel quiet -sexagesimal -print_format json=compact=1 -show_entries error:stream:format "$1" | jq '{
+	filename: (.format.filename),
+	size_mb: (.format.size | tonumber / 1024 / 1024 | round),
+  v_codec: (.streams[0].codec_name),
+  v_codec_tag: (.streams[0].codec_tag_string),
+  width: (.streams[0].width),
+  height: (.streams[0].height),
+  duration: (.streams[0].duration),
+  a_codec: (.streams[1].codec_name),
+  a_codec_tag: (.streams[1].codec_tag_string),
+}'
