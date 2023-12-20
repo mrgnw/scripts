@@ -1,0 +1,77 @@
+#! /usr/bin/env python3
+
+import subprocess
+import shlex
+from pathlib import Path
+
+
+"""Merge audio files into a single m4b file."""
+
+
+def get_duration(filename):
+	result = subprocess.run(
+		[
+			'ffprobe',
+			'-v',
+			'error',
+			'-show_entries',
+			'format=duration',
+			'-of',
+			'default=noprint_wrappers=1:nokey=1',
+			filename,
+		],
+		stdout=subprocess.PIPE,
+		stderr=subprocess.STDOUT,
+	)
+	return float(result.stdout)
+
+
+def format_time(seconds):
+	hours = seconds // 3600
+	minutes = (seconds % 3600) // 60
+	seconds = seconds % 60
+	return f'{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}.000'
+
+
+def main():
+	start_time = 0
+	file_paths = []
+	chapter_lines = []
+
+	for file in Path('.').rglob('*'):
+		if file.suffix in ['.mp3', '.m4b']:
+			full_path = str(file)
+			duration = get_duration(full_path)
+			file_paths.append(full_path)
+			chapter_line = f'{format_time(start_time)} {file.name}'
+			chapter_lines.append(chapter_line)
+			start_time += int(duration)
+
+	with open('concat_list.txt', 'w') as concat_file:
+		for path in sorted(file_paths):
+			concat_file.write(f"file '{shlex.quote(path)}'\n")
+
+	with open('chapters.txt', 'w') as chapters_file:
+		for line in chapter_lines:
+			chapters_file.write(line + '\n')
+
+	subprocess.run(
+		[
+			'ffmpeg',
+			'-f',
+			'concat',
+			'-safe',
+			'0',
+			'-i',
+			'concat_list.txt',
+			'-c:a',
+			'aac',
+			'-b:a',
+			'64k',
+			'output.m4b',
+		]
+	)
+
+
+if __name__ == '__main__':
+	main()
