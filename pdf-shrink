@@ -1,0 +1,12 @@
+#!/usr/bin/env zsh
+
+# shrink pdf file size
+# usage: pdf-shrink <input.pdf> # saves to input_shrink.pdf
+
+# requires ghostscript
+
+filename=$(basename -- "$1")
+extension="${filename##*.}"
+echo "$filename.$extension"
+gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dNOPAUSE -dQUIET -dBATCH \
+  -sOutputFile="${filename}_shrink.${extension}" "$1"
