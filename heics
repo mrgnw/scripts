@@ -1,0 +1,11 @@
+#!/usr/bin/env zsh
+
+mkdir -p heics
+mkdir -p original
+setopt localoptions nocaseglob
+for file in *.{jpeg,jpg,png,arw,dng,psd}(N); do
+	if [[ -f $file ]]; then
+		sips -s format heic "$file" --out "heics/${file:r}.heic"
+		mv "$file" "original/$file"
+	fi
+done
