@@ -1,0 +1,3 @@
+#!/usr/bin/env zsh
+
+sips -s format heic "$1" --out "${1%.*}.heic"
