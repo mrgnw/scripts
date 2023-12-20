@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+
+import subprocess
+import re
+from datetime import datetime
+
+from colorama import Fore, Style
+
+from dataclasses import dataclass, field
+import socket
+from collections import deque, namedtuple
+from array import array
+
+
+def none_to_null(val):
+	"""return a tsv value"""
+	if val is None:
+		return ''
+	else:
+		return str(val)
+
+
+def color(text, color):
+	return f'{color}{text}{Style.RESET_ALL}'
+
+
+def humanize(duration, max_parts=2):
+	"""Convert seconds to human-readable format"""
+	seconds = int(duration.total_seconds())
+	periods = [
+		('y', 60 * 60 * 24 * 365),
+		('M', 60 * 60 * 24 * 30),
+		('w', 60 * 60 * 24 * 7),
+		('d', 60 * 60 * 24),
+		('h', 60 * 60),
+		('m', 60),
+		('s', 1),
+	]
+
+	parts = []
+	for period_name, period_seconds in periods:
+		if seconds > period_seconds:
+			period_value, seconds = divmod(seconds, period_seconds)
+			period_value = f'{period_value:2}'
+			parts.append(f'{period_value}{period_name}')
+
+	return ''.join(parts[:max_parts])
+
+
+ConnPing = namedtuple('ConnPing', ['conn', 'status', 'pings', 'start_time'])
+PingHistoryItem = namedtuple('PingHistoryItem', ['conn', 'status', 'pings', 'start_time', 'duration'])
+
+
+def print_status(item: PingHistoryItem):
+	conn, status, pings, start_time, duration = item
+
+	start = item.start_time.strftime('%H:%M:%S')
+	symbol = '–'
+	status_color = Fore.RED
+
+	if item.status is True:
+		symbol = '•'
+		status_color = Fore.GREEN
+	if item.status is None:
+		start = color(start, Fore.LIGHTBLACK_EX)
+
+	if item.duration is not None:
+		dur = color(humanize(item.duration), status_color)
+	else:
+		dur = ''
+
+	status_symbol = color(symbol, status_color)
+
+	print(f'{start} {status_symbol} {dur:12} {item.conn:^15}')
+
+
+def process_ping(line: str) -> ConnPing:
+	"""Take output of ping and return a ConnPing"""
+
+	timestamp = datetime.now().replace(microsecond=0)
+	# make timestamp precise to 1 second
+	# timestamp = int(timestamp)
+	ping_ms = 0
+	status = None
+	line = line.strip()
+
+	if 'bytes from' in line:
+		time_match = re.search(r'time=(\d+\.\d+)', line)
+		if time_match:
+			status = True
+			ping_value = time_match.group(1)
+			ping_ms = int(float(ping_value))
+		elif 'Request timeout' in line:
+			status = False
+
+	conn = get_wifi_name() or get_ip_address()
+	return ConnPing(conn, status, array('H', [ping_ms]), timestamp)
+
+
+def get_ip_address():
+	try:
+		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		sock.settimeout(2)
+		sock.connect(('8.8.8.8', 80))
+		ip_address = sock.getsockname()[0]
+		sock.close()
+		return ip_address
+	except (socket.error, socket.timeout):
+		return 'No Connection'
+
+
+def get_wifi_name(interface='en0'):
+	try:
+		result = subprocess.run(
+			['networksetup', '-getairportnetwork', interface], capture_output=True, text=True
+		)
+		if result.returncode == 0:
+			wifi_name = result.stdout.strip().split(': ')[1]
+			return wifi_name
+	except Exception as e:
+		pass
+	return None
+
+
+def colorize_pings(pings, dots=True):
+	colored_pings = []
+	for ping in pings:
+		if ping == 0:
+			color = Fore.LIGHTBLACK_EX
+		elif ping < 50:
+			color = Fore.LIGHTGREEN_EX
+		elif ping < 150:
+			color = Fore.LIGHTCYAN_EX
+		elif ping < 300:
+			color = Fore.YELLOW
+		else:
+			color = Fore.RED
+		if dots is True:
+			ping = '•'
+		colored_ping = f'{color}{ping}{Style.RESET_ALL}'
+		colored_pings.append(colored_ping)
+
+	pings_str = ' '.join(colored_pings)
+	return pings_str
+
+
+@dataclass
+class StatusHistory:
+	maxlen: int = 1000
+	history: deque = field(default_factory=lambda maxlen=maxlen: deque(maxlen=maxlen), init=False)
+	show_ping_count = 9
+
+	def fresh_head(self, cp: ConnPing):
+		history_item = PingHistoryItem(*cp, None)
+		self.history.appendleft(history_item)
+
+	def shift_head(self, cp: ConnPing):
+		end_time = datetime.now().replace(microsecond=0)
+		duration = self.get_current_duration()
+
+		self.history[0] = self.history[0]._replace(duration=duration)
+		self.history.appendleft(PingHistoryItem(*cp, None))
+
+	def matches_conn_status(self, cp):
+		prev_conn = self.history[0].conn
+		prev_status = self.history[0].status
+		return self.history and cp.conn == prev_conn and cp.status == prev_status
+
+	def compare_ping(self, cp):
+		if self.matches_conn_status(cp):
+			if cp.conn == 'No Connection':
+				return True
+			self.history[0].pings.extend(cp.pings)
+		else:
+			self.shift_head(cp)
+			print()
+			# print(self.row())
+
+	def __str__(self):
+		if self.history:
+			start = self.history[0].start_time.strftime('%H:%M:%S')
+			symbol = '–'
+			status_color = Fore.RED
+
+			if self.history[0].status is True:
+				symbol = '•'
+				status_color = Fore.GREEN
+			if self.history[0].status is None:
+				start = color(start, Fore.LIGHTBLACK_EX)
+
+			duration = self.get_current_duration()
+
+			if duration is not None:
+				dur = color(humanize(duration), status_color)
+			else:
+				dur = ''
+
+			symbol = color(symbol, status_color)
+			recent_pings = self.history[0].pings[::-1][: self.show_ping_count]
+			# colored_pings = [f"{color(p, Fore.YELLOW)}" for p in recent_pings]
+			pings_str = colorize_pings(recent_pings)
+
+			return f'{start} {symbol} {dur:18} {self.history[0].conn:^15}\t{pings_str}'
+
+		return deque
+
+	def row(self):
+		print('row???')
+		if self.history:
+			return self.history
+		else:
+			return deque
+
+	def get_current_duration(self):
+		if self.history and self.history[0].start_time:
+			end_time = datetime.now().replace(microsecond=0)
+			duration = end_time - self.history[0].start_time
+
+			return duration
+
+		return None
+
+	def tsv_line(self, items):
+		return '\t'.join([none_to_null(x) for x in items]) + '\n'
+
+	def run_pings(self, host='1.1.1.1', interval=1, stop_after=False):
+		process = subprocess.Popen(
+			['ping', '-i', str(interval), host],
+			stdout=subprocess.PIPE,
+			stderr=subprocess.DEVNULL,
+			universal_newlines=True,
+		)
+
+		next(process.stdout)
+		for line in process.stdout:
+			conn_ping = process_ping(line)
+			if self.history:
+				self.compare_ping(conn_ping)
+			else:
+				self.fresh_head(conn_ping)
+
+			print(f'\r{self}', end='', flush=True)
+
+
+if __name__ == '__main__':
+	# accept interval as argument
+	import sys
+
+	interval = 1
+	if len(sys.argv) > 1:
+		interval = sys.argv[1]
+
+	tracker = StatusHistory()
+	tracker.run_pings(interval=interval)
