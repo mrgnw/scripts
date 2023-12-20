@@ -1,0 +1,4 @@
+#!/usr/bin/env zsh
+
+open -a Tailscale
+/Applications/Tailscale.app/Contents/MacOS/Tailscale up
