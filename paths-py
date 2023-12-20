@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# print the PATH variable split by :
+import os
+
+paths = os.environ['PATH'].split(':')
+
+print('\n'.join([f'\t{p}' for p in paths]))
