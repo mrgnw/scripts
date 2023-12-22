@@ -1,0 +1,40 @@
+#! /usr/bin/env swift
+// create a LaunchCTL launcher
+import Foundation
+
+let executableName = ".thing"
+let directoryPath = FileManager.default.currentDirectoryPath
+let directoryName = URL(fileURLWithPath: directoryPath).lastPathComponent
+
+// Use the directory name to create a unique plist filename
+let plistFilename = "com.user.thingLauncher.\(directoryName).plist"
+let plistPath = NSString(string: "~/Library/LaunchAgents/\(plistFilename)").expandingTildeInPath
+
+// Define the dictionary for plist content
+let plistDict: [String: Any] = [
+    "Label": "com.user.thingLauncher.\(directoryName)",
+    "ProgramArguments": ["\(directoryPath)/\(executableName)"],
+    "RunAtLoad": true
+]
+
+// Serialize the dictionary into plist data
+do {
+    let plistData = try PropertyListSerialization.data(fromPropertyList: plistDict, format: .xml, options: 0)
+    try plistData.write(to: URL(fileURLWithPath: plistPath))
+    print("LaunchAgent plist created at \(plistPath)")
+} catch {
+    print("Error creating LaunchAgent plist: \(error)")
+    exit(1)
+}
+
+// Load the LaunchAgent
+let process = Process()
+process.launchPath = "/bin/launchctl"
+process.arguments = ["load", plistPath]
+
+do {
+    try process.run()
+    print("LaunchAgent loaded successfully.")
+} catch {
+    print("Error loading LaunchAgent: \(error)")
+}
