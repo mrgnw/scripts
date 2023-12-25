@@ -2,14 +2,15 @@
 # "Zhu Li, do the thing!"
 # reads a .thing file and does the thing
 
-if [[ -f .thing ]]; then ./.thing
-elif [[ -f docker-compose.yml || -f docker-compose.yaml ]]; then docker-compose up
+if [[ -f .run ]]; then ./.run
+elif [[ -f .thing ]]; then ./.thing
 elif [[ -f main.py ]]; then uvicorn main:app --reload
-elif [[ -f package.json ]]; then bun install && bun run build && bun run dev
-elif [[ -f Package.swift ]]; then swift run
 elif [[ -f main.go ]]; then go run main.go
 elif [[ -f Cargo.toml ]]; then cargo run
 elif [[ -f index.html  ]]; then python3 -m http.server 8000
+elif [[ -f package.json ]]; then bun install && bun run build && bun run dev
+elif [[ -f Package.swift ]]; then swift run
+elif [[ -f docker-compose.yml || -f docker-compose.yaml ]]; then docker-compose up
 else
 	echo "Creating a .thing to do the thing"
 	echo "#!/usr/bin/env zsh" > .thing
