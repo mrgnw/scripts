@@ -23,7 +23,11 @@ def get_duration(filename):
 		stdout=subprocess.PIPE,
 		stderr=subprocess.STDOUT,
 	)
-	return float(result.stdout)
+	try:
+		return float(result.stdout)
+	except ValueError:
+		print(f'Error processing file {filename}: {result.stdout}')
+		return 0
 
 
 def format_time(seconds):
@@ -38,18 +42,20 @@ def main():
 	file_paths = []
 	chapter_lines = []
 
-	for file in Path('.').rglob('*'):
-		if file.suffix in ['.mp3', '.m4b']:
-			full_path = str(file)
-			duration = get_duration(full_path)
-			file_paths.append(full_path)
-			chapter_line = f'{format_time(start_time)} {file.name}'
-			chapter_lines.append(chapter_line)
-			start_time += int(duration)
+	audio_files = sorted([a for a in Path('.').rglob('*') if a.suffix in ['.mp3', '.m4b']])
+	print(audio_files)
+
+	for file in audio_files:
+		full_path = str(file)
+		duration = get_duration(full_path)
+		file_paths.append(full_path)
+		chapter_line = f'{format_time(start_time)} {file.name}'
+		chapter_lines.append(chapter_line)
+		start_time += int(duration)
 
 	with open('concat_list.txt', 'w') as concat_file:
 		for path in sorted(file_paths):
-			concat_file.write(f"file '{shlex.quote(path)}'\n")
+			concat_file.write(f'file {shlex.quote(path)}\n')
 
 	with open('chapters.txt', 'w') as chapters_file:
 		for line in chapter_lines:
