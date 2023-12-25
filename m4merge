@@ -61,6 +61,7 @@ def main():
 		for line in chapter_lines:
 			chapters_file.write(line + '\n')
 
+	# ffmpeg -f concat -safe 0 -i concat_list.txt -c:a aac -b:a 64k output.m4b
 	subprocess.run(
 		[
 			'ffmpeg',
