@@ -4,45 +4,46 @@ import requests
 import json
 import sys
 
-def parse_args():
-		'''
-		if one arg: it could be
-		- duckdb/duckdb
-		- github.com/duckdb/duckdb
-		- https://github.com/duckdb/duckdb
-		if two args:
-		- duckdb duckdb
-		'''
-		if len(sys.argv) == 2:
-			owner, repo = sys.argv[1].split('/')			
-			return owner, repo
 
-		elif len(sys.argv) == 3:
-			owner, repo = sys.argv[1], sys.argv[2]
-			return owner, repo
-		else:
-			print("Usage: git-latest-tag <repo_owner> <repo_name>", file=sys.stderr)
-			sys.exit(1)
-		
+def parse_args():
+	"""
+	if one arg: it could be
+	- duckdb/duckdb
+	- github.com/duckdb/duckdb
+	- https://github.com/duckdb/duckdb
+	if two args:
+	- duckdb duckdb
+	"""
+	if len(sys.argv) == 2:
+		owner, repo = sys.argv[1].split('/')
+		return owner, repo
+
+	elif len(sys.argv) == 3:
+		owner, repo = sys.argv[1], sys.argv[2]
+		return owner, repo
+	else:
+		print('Usage: git-latest-tag <repo_owner> <repo_name>', file=sys.stderr)
+		sys.exit(1)
+
 
 def get_latest_github_tag(repo_owner, repo_name):
-		response = requests.get(f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags')
-		if response.status_code == 200:
-			tags = json.loads(response.text)
-			if tags:
-				latest_version = tags[0]['name']
-				return latest_version.lstrip('v')
-		return None
+	response = requests.get(f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags')
+	if response.status_code == 200:
+		tags = json.loads(response.text)
+		if tags:
+			latest_version = tags[0]['name']
+			return latest_version.lstrip('v')
+	return None
 
-if __name__ == "__main__":
-		
-		repo_owner, repo_name = parse_args()
-		latest_version = get_latest_github_tag(repo_owner, repo_name)
-		
-		if latest_version:
-				print(latest_version)
-				# make latest_version available to stdout if this script is being called from another script
-				sys.stdout.flush()
-		else:
-				print(f"Failed to fetch the latest tag for {repo_owner}/{repo_name}", file=sys.stderr)
-				sys.exit(2)
+
+if __name__ == '__main__':
+	repo_owner, repo_name = parse_args()
+	latest_version = get_latest_github_tag(repo_owner, repo_name)
+
+	if latest_version:
+		print(latest_version)
+		# make latest_version available to stdout if this script is being called from another script
+		sys.stdout.flush()
+	else:
+		print(f'Failed to fetch the latest tag for {repo_owner}/{repo_name}', file=sys.stderr)
+		sys.exit(2)
