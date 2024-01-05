@@ -20,18 +20,15 @@ class SqlFileChangeHandler(FileSystemEventHandler):
 			self.transpile_and_format_sql()
 
 	def transpile_and_format_sql(self):
-		try:
-			with open(self.src_path, 'r') as file:
-				sql = file.read()
+		with open(self.src_path, 'r') as file:
+			sql = file.read()
 
-			transpiled_sql = sqlglot.transpile(sql, read=self.src, write=self.tgt, pretty=True)[0]
+		transpiled = sqlglot.transpile(sql, read=self.src, write=self.tgt, pretty=True)[0]
 
-			with open(self.tgt_path, 'w') as file:
-				file.write(transpiled_sql)
+		with open(self.tgt_path, 'w') as file:
+			file.write(transpiled)
 
-			print(f'\t{self.src_path.name} ▸ {self.tgt_path.name}')
-		except Exception as e:
-			print(f'Error during transpilation or file write: {e}')
+		print(f'\t{self.src_path.name} ▸ {self.tgt_path.name}')
 
 
 def main():
