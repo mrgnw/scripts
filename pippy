@@ -1,0 +1,41 @@
+#!/usr/bin/env zsh
+
+# Function to install packages required by a single Python file
+function install_requirements_for_file() {
+    local python_file=$1
+    shift # Remove the first argument
+
+    # Use Python to extract required packages and install them
+    python3 -c "
+import ast, sys
+
+def is_standard_lib(module_name):
+    try:
+        return module_name in sys.stdlib_module_names
+    except AttributeError:
+        return False
+
+def get_top_level_module(name):
+    return name.split('.')[0]
+
+required_packages = set()
+with open('$python_file', 'r') as file:
+    root = ast.parse(file.read(), filename='$python_file')
+    for node in ast.walk(root):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                package = get_top_level_module(alias.name)
+                if not is_standard_lib(package):
+                    required_packages.add(package)
+        elif isinstance(node, ast.ImportFrom):
+            package = get_top_level_module(node.module)
+            if not is_standard_lib(package):
+                required_packages.add(package)
+
+for package in required_packages:
+    print(package)
+" | xargs pip install "$@"
+}
+
+# Main script execution
+install_requirements_for_file "$@"
