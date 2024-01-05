@@ -9,11 +9,11 @@ from watchdog.events import FileSystemEventHandler
 
 
 class SqlFileChangeHandler(FileSystemEventHandler):
-	def __init__(self, src_path, tgt_path, src_dialect, tgt_dialect):
+	def __init__(self, src_path, tgt_path, src, tgt):
 		self.src_path = Path(src_path).resolve()
 		self.tgt_path = Path(tgt_path).resolve()
-		self.src_dialect = src_dialect
-		self.tgt_dialect = tgt_dialect
+		self.src = src
+		self.tgt = tgt
 
 	def on_modified(self, event):
 		if Path(event.src_path).resolve() == self.src_path:
@@ -24,9 +24,7 @@ class SqlFileChangeHandler(FileSystemEventHandler):
 			with open(self.src_path, 'r') as file:
 				sql = file.read()
 
-			transpiled_sql = sqlglot.transpile(
-				sql, read=self.src_dialect, write=self.tgt_dialect, pretty=True
-			)[0]
+			transpiled_sql = sqlglot.transpile(sql, read=self.src, write=self.tgt, pretty=True)[0]
 
 			with open(self.tgt_path, 'w') as file:
 				file.write(transpiled_sql)
@@ -38,15 +36,13 @@ class SqlFileChangeHandler(FileSystemEventHandler):
 
 def main():
 	parser = argparse.ArgumentParser(description='Monitor and transpile SQL files.')
+	parser.add_argument('--tgt', default='mysql', help='Target SQL dialect')
 	parser.add_argument('--src_sql', type=str, default='src.sql', help='Source SQL file path')
-	parser.add_argument('--src_dialect', default='duckdb', help='Source SQL dialect')
-	parser.add_argument('--tgt_dialect', default='mysql', help='Target SQL dialect')
+	parser.add_argument('--src', default='duckdb', help='Source SQL dialect')
 
 	args = parser.parse_args()
 
-	event_handler = SqlFileChangeHandler(
-		args.src_sql, f'{args.tgt_dialect}.sql', args.src_dialect, args.tgt_dialect
-	)
+	event_handler = SqlFileChangeHandler(args.src_sql, f'{args.tgt}.sql', args.src, args.tgt)
 	observer = Observer()
 	observer.schedule(event_handler, path=Path(args.src_sql).parent, recursive=True)
 	observer.start()
