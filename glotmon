@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+
+# pip install --user watchdog sqlglot sqlparse
+
+import argparse
+from pathlib import Path
+import sqlglot
+import sqlparse
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+
+class SqlFileChangeHandler(FileSystemEventHandler):
+	def __init__(self, src_path, tgt_path, src_dialect, tgt_dialect):
+		self.src_path = Path(src_path).resolve()
+		self.tgt_path = Path(tgt_path).resolve()
+		self.src_dialect = src_dialect
+		self.tgt_dialect = tgt_dialect
+
+	def on_modified(self, event):
+		if Path(event.src_path).resolve() == self.src_path:
+			self.transpile_and_format_sql()
+
+	def transpile_and_format_sql(self):
+		try:
+			with open(self.src_path, 'r') as file:
+				sql = file.read()
+
+			transpiled_sql = sqlglot.transpile(sql, read=self.src_dialect, write=self.tgt_dialect)[0]
+			formatted_sql = sqlparse.format(transpiled_sql, reindent=True, keyword_case='upper')
+
+			with open(self.tgt_path, 'w') as file:
+				file.write(formatted_sql)
+
+			print(f'\t{self.src_path.name} ▸ {self.tgt_path.name}')
+		except Exception as e:
+			print(f'Error during transpilation or file write: {e}')
+
+
+def main():
+	parser = argparse.ArgumentParser(description='Monitor and transpile SQL files.')
+	parser.add_argument('--src_sql', type=str, default='src.sql', help='Source SQL file path')
+	parser.add_argument('--src_dialect', default='duckdb', help='Source SQL dialect')
+	parser.add_argument('--tgt_dialect', default='mysql', help='Target SQL dialect')
+
+	args = parser.parse_args()
+
+	event_handler = SqlFileChangeHandler(
+		args.src_sql, f'{args.tgt_dialect}.sql', args.src_dialect, args.tgt_dialect
+	)
+	observer = Observer()
+	observer.schedule(event_handler, path=Path(args.src_sql).parent, recursive=True)
+	observer.start()
+
+	print(f'Monitoring {args.src_sql} for changes...')
+	try:
+		while True:
+			pass
+	except KeyboardInterrupt:
+		observer.stop()
+	observer.join()
+
+
+if __name__ == '__main__':
+	main()
