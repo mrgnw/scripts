@@ -5,7 +5,6 @@
 import argparse
 from pathlib import Path
 import sqlglot
-import sqlparse
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -26,11 +25,12 @@ class SqlFileChangeHandler(FileSystemEventHandler):
 			with open(self.src_path, 'r') as file:
 				sql = file.read()
 
-			transpiled_sql = sqlglot.transpile(sql, read=self.src_dialect, write=self.tgt_dialect)[0]
-			formatted_sql = sqlparse.format(transpiled_sql, reindent=True, keyword_case='upper')
+			transpiled_sql = sqlglot.transpile(
+				sql, read=self.src_dialect, write=self.tgt_dialect, pretty=True
+			)[0]
 
 			with open(self.tgt_path, 'w') as file:
-				file.write(formatted_sql)
+				file.write(transpiled_sql)
 
 			print(f'\t{self.src_path.name} ▸ {self.tgt_path.name}')
 		except Exception as e:
