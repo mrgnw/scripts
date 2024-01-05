@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# pip install --user watchdog sqlglot sqlparse
+# pip install watchdog sqlglot sqlparse
 
 import argparse
 from pathlib import Path
