@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import sqlglot
+from sqlglot.optimizer import optimize
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -22,7 +23,8 @@ class SqlFileChangeHandler(FileSystemEventHandler):
 		with open(self.src_path, 'r') as file:
 			sql = file.read()
 
-		transpiled = sqlglot.transpile(sql, read=self.src, write=self.tgt, pretty=True)[0]
+		optimized = optimize(sqlglot.parse_one(sql)).sql(pretty=True)
+		transpiled = '\n'.join(sqlglot.transpile(optimized, read=self.src, write=self.tgt, pretty=True))
 
 		with open(self.tgt_path, 'w') as file:
 			file.write(transpiled)
