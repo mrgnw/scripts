@@ -34,8 +34,8 @@ class SqlFileChangeHandler(FileSystemEventHandler):
 
 def main():
 	parser = argparse.ArgumentParser(description='Monitor and transpile SQL files.')
-	parser.add_argument('src_dialect', default='mysql', nargs='?', help='Source SQL dialect')
-	parser.add_argument('tgt_dialect', default='postgres', nargs='?', help='Target SQL dialect')
+	parser.add_argument('src_dialect', default='duckdb', nargs='?', help='Source SQL dialect')
+	parser.add_argument('tgt_dialect', default='mysql', nargs='?', help='Target SQL dialect')
 
 	args = parser.parse_args()
 	src = args.src_dialect
