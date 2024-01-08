@@ -9,9 +9,9 @@ from watchdog.events import FileSystemEventHandler
 
 
 class SqlFileChangeHandler(FileSystemEventHandler):
-	def __init__(self, src_path, tgt_path, src, tgt):
-		self.src_path = Path(src_path).resolve()
-		self.tgt_path = Path(tgt_path).resolve()
+	def __init__(self, src, tgt):
+		self.src_path = Path(f'{src}.sql').resolve()
+		self.tgt_path = Path(f'{tgt}.sql').resolve()
 		self.src = src
 		self.tgt = tgt
 
@@ -34,18 +34,20 @@ class SqlFileChangeHandler(FileSystemEventHandler):
 
 def main():
 	parser = argparse.ArgumentParser(description='Monitor and transpile SQL files.')
-	parser.add_argument('--tgt', default='mysql', help='Target SQL dialect')
-	parser.add_argument('--src_sql', type=str, default='src.sql', help='Source SQL file path')
-	parser.add_argument('--src', default='duckdb', help='Source SQL dialect')
+	parser.add_argument('src_dialect', default='mysql', nargs='?', help='Source SQL dialect')
+	parser.add_argument('tgt_dialect', default='postgres', nargs='?', help='Target SQL dialect')
 
 	args = parser.parse_args()
+	src = args.src_dialect
+	tgt = args.tgt_dialect
+	Path(f'{src}.sql').touch()
 
-	event_handler = SqlFileChangeHandler(args.src_sql, f'{args.tgt}.sql', args.src, args.tgt)
+	event_handler = SqlFileChangeHandler(src, tgt)
 	observer = Observer()
-	observer.schedule(event_handler, path=Path(args.src_sql).parent, recursive=True)
+	observer.schedule(event_handler, path=Path(src).parent)
 	observer.start()
 
-	print(f'Monitoring {args.src_sql} for changes...')
+	print(f'Monitoring {src}.sql for changes...')
 	try:
 		while True:
 			pass
