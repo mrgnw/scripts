@@ -37,7 +37,7 @@ favicon_manifest() {
 	]
 }
 EOF
-jq . "$manifest_file" > "$manifest_file.tmp" && mv "$manifest_file.tmp" "$manifest_file"
+	jq . "$manifest_file" > "$manifest_file.tmp" && mv "$manifest_file.tmp" "$manifest_file"
 }
 
 generate_favicon
