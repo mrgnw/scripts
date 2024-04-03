@@ -1,0 +1,13 @@
+#! /usr/bin/env zsh
+
+v_latest=$(git-latest-tag duckdb/duckdb)
+echo " 🦆" "$v_latest"
+duck_url=https://github.com/duckdb/duckdb/releases/download/v$v_latest/duckdb_cli-osx-universal.zip
+duck_zip="$HOME/Downloads/duckdb-${v_latest}.zip"
+
+echo " 🐣" "$duck_url"
+curl -L -o "$duck_zip" "$duck_url"
+
+mkdir -p "$HOME/.binaries"
+unzip -o "$duck_zip" -d "$HOME/.binaries"
+trash "$duck_zip"
