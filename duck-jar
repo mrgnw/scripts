@@ -1,0 +1,5 @@
+#/usr/bin/env zsh
+
+v_latest=$(git-latest-tag duckdb/duckdb)
+echo $v_latest
+curl -O "https://repo.maven.apache.org/maven2/org/duckdb/duckdb_jdbc/$v_latest/duckdb_jdbc-$v_latest.jar"
