@@ -1,0 +1,42 @@
+#!/usr/bin/env zsh
+# inspired by
+# https://evilmartians.com/chronicles/how-to-favicon-in-2021-six-files-that-fit-most-needs
+
+generate_favicon() {
+	bunx svgo --multipass icon.svg
+	
+	png_sizes=(512 192 180 32 16)
+	for size in $png_sizes; do
+		rsvg-convert icon.svg -w $size -h $size -o "icon-${size}.png"
+	done
+
+	optimizt *.png
+
+	convert "icon-32.png" "icon-16.png" favicon.ico
+}
+
+favicon_manifest(){
+	
+	local target_dir="${1:-$PWD}"
+	local manifest_file="${target_dir}/manifest.webmanifest"
+
+	local icons_json="\"icons\": ["
+
+	for png_file in $target_dir/icon-*.png; do
+		local size="${png_file:t:r:l}"
+		size="${size#icon-}"
+
+		icons_json+="{ \"src\": \"/${png_file:t}\", \"type\": \"image/png\", \"sizes\": \"${size}x${size}\" },"
+	done
+
+	icons_json="${icons_json%,}]"
+
+	local manifest_content="{ $icons_json }"
+
+	echo $manifest_content > "$manifest_file"
+	jq . "$manifest_file" > "$manifest_file.tmp" && mv "$manifest_file.tmp" "$manifest_file"
+}
+
+generate_favicon
+
+favicon_manifest
