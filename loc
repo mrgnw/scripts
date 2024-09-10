@@ -1,0 +1,17 @@
+#!/bin/zsh
+git log --format="" --numstat | awk 'BEGIN {
+    printf "\033[1m%4s\t%-4s\t%s\033[0m\n", "+", "-", "File"
+} {
+    add[$3] += $1;
+    del[$3] += $2;
+} END {
+    for (f in add) {
+        printf "%s\t%4d\t%-4d\n", f, add[f], del[f]
+    }
+}' | sort | awk 'BEGIN {
+    printf "\033[1m%4s\t%-4s\t%s\033[0m\n", "Add", "Del", "File"
+} {
+    if (NR > 1) {
+        printf "\033[32m%4d\033[0m\t\033[31m%-4d\033[0m\t%s\n", $2, $3, $1
+    }
+}'
