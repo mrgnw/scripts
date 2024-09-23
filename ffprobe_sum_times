@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+
+import subprocess
+from pathlib import Path
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+
+
+def main():
+	files = get_files(sys.argv[1:])
+	with ThreadPoolExecutor(max_workers=32) as executor:
+		future_to_file = {executor.submit(get_duration, file): file for file in files}
+		durations = {
+			str(future_to_file[future]): future.result()
+			for future in as_completed(future_to_file)
+			if future.result() > 0
+		}
+	dur_strs = [f'{format_time(duration)}\t{file}' for file, duration in durations.items()]
+	print('\n'.join(dur_strs))
+	total_seconds = sum(durations.values())
+	print('Total playtime:', format_time(total_seconds))
+
+
+def get_files(args):
+	files = []
+	if not args:
+		files.extend(scan_directory('.'))
+	else:
+		for arg in args:
+			path = Path(arg)
+			if path.is_dir():
+				files.extend(scan_directory(arg))
+			else:
+				files.extend(scan_directory('.', pattern=arg))
+	return [file for file in files if file.is_file()]
+
+
+def scan_directory(directory, pattern='*'):
+	with os.scandir(directory) as it:
+		for entry in it:
+			if entry.is_file() and Path(entry.name).match(pattern):
+				yield Path(entry.path)
+
+
+def get_duration(filename):
+	try:
+		result = subprocess.run(
+			[
+				'ffprobe',
+				'-v',
+				'error',
+				'-show_entries',
+				'format=duration',
+				'-of',
+				'default=noprint_wrappers=1:nokey=1',
+				filename,
+			],
+			stdout=subprocess.PIPE,
+			stderr=subprocess.STDOUT,
+			universal_newlines=True,
+		)
+		return float(result.stdout.strip())
+	except Exception:
+		return 0
+
+
+def format_time(seconds):
+	h = int(seconds // 3600)
+	m = int((seconds % 3600) // 60)
+	s = int(seconds % 60)
+	return f'{h:2d}h {m:2d}m {s:2d}s'
+
+
+if __name__ == '__main__':
+	main()
