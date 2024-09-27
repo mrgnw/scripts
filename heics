@@ -3,9 +3,9 @@
 mkdir -p heics
 mkdir -p original
 setopt localoptions nocaseglob
-for file in *.{jpeg,jpg,png,arw,dng,psd}(N); do
+for file in *.{jpeg,jpg,png,arw,dng,psd,jxl}(N); do
 	if [[ -f $file ]]; then
-		sips -s format heic "$file" --out "heics/${file:r}.heic"
+		sips -s format heic "$file" --out "${file:r}.heic" 2>&1 | sed "s|$PWD/||g"
 		mv "$file" "original/$file"
 	fi
 done
