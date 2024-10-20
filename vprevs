@@ -1,0 +1,11 @@
+#!/usr/bin/env zsh
+setopt localoptions nocaseglob
+
+extensions=(
+    "*.mp4" "*.mov" "*.avi" "*.mkv"
+)
+
+find . -maxdepth 1 -type f \( \
+    $(printf -- "-iname %s -o " "${extensions[@]}" | sed 's/ -o $//') \
+    \) -print0 | \
+    parallel --bar -0 -j "$(sysctl -n hw.ncpu)" vprev "{}"
