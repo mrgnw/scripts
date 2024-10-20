@@ -1,11 +1,17 @@
 #!/usr/bin/env zsh
 
-mkdir -p heics
 mkdir -p original
 setopt localoptions nocaseglob
-for file in *.{jpeg,jpg,png,arw,dng,psd,jxl}(N); do
-	if [[ -f $file ]]; then
-		sips -s format heic "$file" --out "${file:r}.heic" 2>&1 | sed "s|$PWD/||g"
-		mv "$file" "original/$file"
-	fi
-done
+
+extensions=(
+    "*.jpeg" "*.jpg" "*.png"
+    "*.arw" "*.dng" "*.psd" "*.jxl"
+)
+
+find . -maxdepth 1 -type f \( \
+    $(printf -- "-iname %s -o " "${extensions[@]}") \
+    -false \) -print0 | \
+    parallel -0 -j "$(sysctl -n hw.ncpu)" '
+        heic {}
+        mv {} original/{}
+    '
