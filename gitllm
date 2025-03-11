@@ -17,6 +17,8 @@ from fnmatch import fnmatch
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn
+from rich.tree import Tree
+import io
 
 # Configuration
 DEFAULT_BRANCH = 'main'
@@ -30,22 +32,22 @@ HEADERS = (
 console = Console()
 
 # Simplified project file patterns
-SVELTE_PATTERNS = [
-    # Key configuration files
-    'package.json',
-    'svelte.config.js',
-    'vite.config.js',
-    'vite.config.ts',
-    # All relevant file types throughout the project
-    '**/*.json',
-    '**/*.js',
-    '**/*.ts',
-    '**/*.svelte',
+FILE_PATTERNS = [
+	# Key configuration files
+	'package.json',
+	'svelte.config.js',
+	'vite.config.js',
+	'vite.config.ts',
+	# All relevant file types throughout the project
+	'**/*.json',
+	'**/*.js',
+	'**/*.ts',
+	'**/*.svelte',
 ]
 
 
 async def fetch_repo_files(repo, branch='main'):
-	"""Fetch all Svelte files from a repository."""
+	"""Fetch all matching files from a repository."""
 	owner, name = repo.split('/')
 
 	# Check repository and get default branch if needed
@@ -72,7 +74,7 @@ async def fetch_repo_files(repo, branch='main'):
 		# Filter files based on patterns
 		matching_files = []
 		for item in tree_data.get('tree', []):
-			if item['type'] == 'blob' and any(fnmatch(item['path'], pattern) for pattern in SVELTE_PATTERNS):
+			if item['type'] == 'blob' and any(fnmatch(item['path'], pattern) for pattern in FILE_PATTERNS):
 				matching_files.append({'path': item['path']})
 
 	console.print(f'Found [bold green]{len(matching_files)}[/] matching files.')
@@ -94,18 +96,17 @@ async def fetch_file_contents(repo, files, branch):
 
 		async with aiohttp.ClientSession() as session:
 			# Process in batches to avoid rate limits
-			batch_size = 5
+			batch_size = 10  # Increase batch size slightly for better performance
 			for i in range(0, len(files), batch_size):
 				batch = files[i : i + batch_size]
-				batch_tasks = []
+				urls = [
+					f"https://raw.githubusercontent.com/{owner}/{name}/{branch}/{file['path']}"
+					for file in batch
+				]
+				paths = [file['path'] for file in batch]
 
-				for file in batch:
-					url = f"https://raw.githubusercontent.com/{owner}/{name}/{branch}/{file['path']}"
-					task = asyncio.create_task(fetch_single_file(session, url, file['path']))
-					batch_tasks.append(task)
-
-				# Wait for batch to complete
-				batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+				tasks = [fetch_single_file(session, url, path) for url, path in zip(urls, paths)]
+				batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
 				for j, result in enumerate(batch_results):
 					file_path = batch[j]['path']
@@ -128,7 +129,7 @@ async def fetch_single_file(session, url, path):
 
 
 def generate_tree_structure(files):
-	"""Generate a tree structure for the output markdown."""
+	"""Generate a tree structure for the output markdown using rich."""
 	# Build directory tree dictionary
 	path_dict = {}
 	for file in files:
@@ -144,43 +145,27 @@ def generate_tree_structure(files):
 					current[part] = {}
 				current = current[part]
 
-	# Build markdown tree representation
-	lines = []
+	# Build tree using rich's Tree
+	tree = Tree('Repository')
 
-	def build_tree(node, prefix=''):
-		items = sorted([(k, v) for k, v in node.items() if k != 'files'])
-		files = node.get('files', [])
-
+	def build_tree(node, tree_node):
 		# Process directories
-		for i, (name, contents) in enumerate(items):
-			is_last = i == len(items) - 1 and not files
-			if is_last:
-				lines.append(f'{prefix}└── 📁 {name}/')
-				build_tree(contents, prefix + '    ')
-			else:
-				lines.append(f'{prefix}├── 📁 {name}/')
-				build_tree(contents, prefix + '│   ')
+		for name, contents in sorted([(k, v) for k, v in node.items() if k != 'files']):
+			branch = tree_node.add(f'{name}/')
+			build_tree(contents, branch)
 
 		# Process files
-		for i, file in enumerate(sorted(files)):
-			is_last = i == len(files) - 1
-			ext = file.split('.')[-1] if '.' in file else ''
+		for file in sorted(node.get('files', [])):
+			tree_node.add(file)
 
-			icon = '📄'
-			if ext in ['js', 'ts']:
-				icon = '🟨'
-			elif ext == 'json':
-				icon = '🔧'
-			elif ext == 'svelte':
-				icon = '🔥'
+	build_tree(path_dict, tree)
 
-			if is_last:
-				lines.append(f'{prefix}└── {icon} {file}')
-			else:
-				lines.append(f'{prefix}├── {icon} {file}')
+	# Capture the tree as a string
+	str_io = io.StringIO()
+	console_capture = Console(file=str_io, width=100)
+	console_capture.print(tree)
 
-	build_tree(path_dict)
-	return '\n'.join(lines)
+	return str_io.getvalue()
 
 
 async def main():
@@ -217,11 +202,12 @@ async def main():
 		)
 	)
 
+	# Use a try-except-finally pattern for better cleanup
 	try:
 		# Fetch matching files
 		files = await fetch_repo_files(repo, branch)
 		if not files:
-			console.print('[yellow]No Svelte project files found in repository.[/]')
+			console.print('[yellow]No matching files found in repository.[/]')
 			return
 
 		# Sort files for consistent output
@@ -235,11 +221,11 @@ async def main():
 		tree_md = generate_tree_structure(files)
 
 		# Generate markdown content
-		repo_name = repo.split('/')[1]
+		repo_name = repo.split('/')[-1]  # This handles both owner/repo and URL formats
 		md_content = f'# {repo_name} Project Structure\n\n'
 		md_content += '## File Tree\n\n'
-		md_content += tree_md
-		md_content += '\n\n## File Contents\n\n'
+		md_content += f'```\n{tree_md}\n```\n\n'
+		md_content += '## File Contents\n\n'
 
 		# Add file contents
 		for file in file_contents:
