@@ -47,7 +47,7 @@ SVELTE_PATTERNS = [
 
 
 async def fetch_repo_files(repo, branch='main'):
-	"""Fetch all files matching patterns from a repository."""
+	"""Fetch all Svelte files from a repository."""
 	owner, name = repo.split('/')
 
 	# Check repository and get default branch if needed
