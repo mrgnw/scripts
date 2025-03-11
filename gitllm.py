@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.markdown import Markdown
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
 from rich.tree import Tree
 from rich import print as rprint
 from tqdm.asyncio import tqdm as async_tqdm
@@ -30,7 +30,7 @@ from tqdm.asyncio import tqdm as async_tqdm
 # Configuration
 DEFAULT_BRANCH = 'main'
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')  # Set your GitHub token in env variables
-OUTPUT_FILE = 'repo_structure.md'
+OUTPUT_FILE = 'repo_files.md'  # Updated default file name
 HEADERS = (
     {'Authorization': f'bearer {GITHUB_TOKEN}', 'Content-Type': 'application/json'} if GITHUB_TOKEN else {}
 )
@@ -183,43 +183,136 @@ def get_all_files(repo, branch='main'):
     build_tree(file_tree, path_dict, True)
     console.print(file_tree)
     
-    console.print(f"\nFound [bold green]{len(matching_files)}[/] matching files out of [cyan]{len(all_files)}[/] total files.")
+    console.print(f"\nFound [bold green]{len(matching_files)}[/] matching files. Fetching content...")
     
-    return matching_files
+    # Generate a markdown representation of the tree for the output file
+    # Use GitHub-flavored markdown tree format
+    md_tree_content = []
+    
+    def build_md_tree(path_dict, prefix=""):
+        items = sorted([(k, v) for k, v in path_dict.items() if k != "files"])
+        file_items = path_dict.get("files", [])
+        
+        # Process all items except the last one with ├── prefix
+        for i, (key, value) in enumerate(items[:-1] if items else []):
+            md_tree_content.append(f"{prefix}├── 📁 {key}/")
+            new_prefix = f"{prefix}│   "
+            build_md_tree(value, new_prefix)
+        
+        # Process the last directory item with └── prefix
+        if items:
+            key, value = items[-1]
+            md_tree_content.append(f"{prefix}└── 📁 {key}/")
+            new_prefix = f"{prefix}    "
+            build_md_tree(value, new_prefix)
+        
+        # Process files with appropriate prefixes
+        sorted_files = sorted(file_items)
+        for i, file in enumerate(sorted_files):
+            ext = file.split('.')[-1] if '.' in file else ''
+            icon = "📄"
+            if ext in ['js', 'ts']:
+                icon = "🟨"
+            elif ext == 'json':
+                icon = "🔧"
+            elif ext == 'svelte':
+                icon = "🔥"
+            elif ext in ['md', 'markdown']:
+                icon = "📝"
+                
+            # Use different prefix for last item
+            if i == len(sorted_files) - 1:
+                md_tree_content.append(f"{prefix}└── {icon} {file}")
+            else:
+                md_tree_content.append(f"{prefix}├── {icon} {file}")
+    
+    build_md_tree(path_dict)
+    md_tree = "\n".join(md_tree_content)
+    
+    return matching_files, md_tree
 
 
 async def fetch_content_async(repo, files, branch):
-    """Fetch file contents asynchronously with a progress bar."""
+    """Fetch file contents asynchronously with individual progress bars for each file."""
     owner, name = repo.split('/')
     
-    # Set up a rich progress display
+    # Set up a rich progress display with multiple tasks
     results = []
     
-    # Create custom progress display
+    # Create multi-progress display
     with Progress(
-        SpinnerColumn(),
         TextColumn("[bold blue]{task.description}"),
         BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("[cyan]{task.fields[file_path]}"),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("•"),
+        TimeRemainingColumn(),
+        console=console,
     ) as progress:
-        task = progress.add_task("[green]Downloading files...", total=len(files), file_path="")
+        # Create a task for each file
+        tasks = {}
+        for i, file in enumerate(files):
+            # Truncate file name if it's too long for display
+            display_name = file['path']
+            if len(display_name) > 40:
+                display_name = "..." + display_name[-37:]
+                
+            tasks[file['path']] = progress.add_task(
+                f"[cyan]{display_name}[/]", 
+                total=1.0,
+                completed=0.0
+            )
         
+        # Process files with proper progress tracking
         async with aiohttp.ClientSession() as session:
-            for file in files:
-                progress.update(task, advance=0, file_path=file['path'])
-                try:
-                    content = await fetch_file_content_async(session, repo, file['path'], branch)
-                    results.append({
-                        'path': file['path'],
-                        'content': content
-                    })
-                    progress.update(task, advance=1)
-                except Exception as e:
-                    console.print(f"[red]Error fetching {file['path']}: {e}[/]")
-                    progress.update(task, advance=1)
+            # Process in batches to avoid hitting rate limits
+            batch_size = 5  # Adjust based on API rate limits
+            for i in range(0, len(files), batch_size):
+                batch = files[i:i+batch_size]
+                
+                # Create tasks for each file in the batch
+                batch_tasks = []
+                for file in batch:
+                    task = asyncio.create_task(
+                        fetch_file_with_progress(
+                            session, repo, file['path'], branch, 
+                            progress, tasks[file['path']]
+                        )
+                    )
+                    batch_tasks.append(task)
+                
+                # Wait for this batch to complete
+                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                
+                # Process results from this batch
+                for j, result in enumerate(batch_results):
+                    file_path = batch[j]['path']
+                    if isinstance(result, Exception):
+                        console.print(f"[red]Error fetching {file_path}: {result}[/]")
+                        # Ensure progress bar is completed even on error
+                        progress.update(tasks[file_path], completed=1.0)
+                    else:
+                        results.append({
+                            'path': file_path,
+                            'content': result
+                        })
     
     return results
+
+
+async def fetch_file_with_progress(session, repo, path, branch, progress, task_id):
+    """Fetch a single file with progress tracking."""
+    # First update to show we're starting
+    progress.update(task_id, completed=0.1)
+    
+    try:
+        # Fetch the file content
+        content = await fetch_file_content_async(session, repo, path, branch)
+        # Mark as complete
+        progress.update(task_id, completed=1.0)
+        return content
+    except Exception as e:
+        progress.update(task_id, completed=1.0)
+        raise e
 
 
 async def fetch_file_content_async(session, repo, path, branch='main'):
@@ -251,9 +344,9 @@ async def fetch_file_content_async(session, repo, path, branch='main'):
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate a structure document from GitHub repository files')
     parser.add_argument('repo', nargs='?', help='GitHub repository in format owner/repo')
+    parser.add_argument('output', nargs='?', default=OUTPUT_FILE, help='Output markdown file path')
     parser.add_argument('--repo', dest='repo_option', help='GitHub repository in format owner/repo')
     parser.add_argument('--branch', default='main', help='Repository branch (default: main)')
-    parser.add_argument('--output', default=OUTPUT_FILE, help='Output markdown file')
     parser.add_argument('--patterns', nargs='+', help='File patterns to include')
     parser.add_argument('--all', action='store_true', help='Include all js/ts/svelte/json files')
     parser.add_argument('--preview', action='store_true', help='Preview the markdown in terminal')
@@ -300,13 +393,13 @@ async def async_main():
     
     try:
         console.print(f"[bold]Fetching repository structure for [green]{args.repo}[/] (branch: [yellow]{args.branch}[/])...")
-        matching_files = get_all_files(args.repo, args.branch)
+        matching_files, md_tree = get_all_files(args.repo, args.branch)
         
         if not matching_files:
             console.print("[yellow]No files matched the specified patterns.[/]")
             return
         
-        console.print(f"Found [bold green]{len(matching_files)}[/] matching files. Fetching content...")
+        # No need to repeat the file count here - removed redundant message
         
         # Process files in sorted order for consistent output
         matching_files.sort(key=lambda f: f['path'])
@@ -314,22 +407,27 @@ async def async_main():
         # Fetch file contents asynchronously
         file_contents = await fetch_content_async(args.repo, matching_files, args.branch)
         
-        # Check if we actually got content for all files
-        console.print(f"Successfully fetched content for [bold green]{len(file_contents)}[/] of [cyan]{len(matching_files)}[/] files")
+        # Check if we actually got content for all files - simplified message
+        console.print(f"Successfully fetched [bold green]{len(file_contents)}/{len(matching_files)}[/] files")
         
         # Extract repository name for the header
         repo_name = args.repo.split('/')[1]
+        
+        # Generate markdown with tree structure at the top - more GitHub-friendly format
         md_content = f'# {repo_name} Project Structure\n\n'
+        md_content += "## File Tree\n\n"
+        md_content += md_tree
+        md_content += "\n\n## File Contents\n\n"
         
         for file_data in file_contents:
             file_path = file_data['path']
             content = file_data['content']
             # Add language-specific syntax highlighting
             extension = file_path.split('.')[-1] if '.' in file_path else ''
-            md_content += f"## {file_path}\n\n```{extension}\n{content}\n```\n\n"
+            md_content += f"### {file_path}\n\n```{extension}\n{content}\n```\n\n"
         
-        Path(output_file).write_text(md_content, encoding='utf-8')
-        console.print(f"[bold green]Generated:[/] {output_file}")
+        Path(args.output).write_text(md_content, encoding='utf-8')
+        console.print(f"[bold green]Generated:[/] {args.output}")
         
         if args.preview:
             console.print("\n[bold]Preview of the generated document:[/]")
