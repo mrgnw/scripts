@@ -2,13 +2,11 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "requests",
 #     "aiohttp",
 #     "rich"
 # ]
 # ///
 import os
-import requests
 import asyncio
 import aiohttp
 from pathlib import Path
@@ -53,9 +51,10 @@ async def fetch_repo_files(repo, branch='main'):
 	# Check repository and get default branch if needed
 	with console.status('[bold green]Checking repository...', spinner='dots'):
 		url = f'https://api.github.com/repos/{owner}/{name}'
-		response = requests.get(url, headers=HEADERS)
-		response.raise_for_status()
-		repo_info = response.json()
+		async with aiohttp.ClientSession(headers=HEADERS) as session:
+			async with session.get(url) as response:
+				response.raise_for_status()
+				repo_info = await response.json()
 
 		if branch == 'main' and repo_info['default_branch'] != 'main':
 			branch = repo_info['default_branch']
@@ -64,9 +63,10 @@ async def fetch_repo_files(repo, branch='main'):
 	# Get repository contents using Git Trees API
 	with console.status('[bold green]Fetching repository structure...', spinner='dots'):
 		tree_url = f'https://api.github.com/repos/{owner}/{name}/git/trees/{branch}?recursive=1'
-		response = requests.get(tree_url, headers=HEADERS)
-		response.raise_for_status()
-		tree_data = response.json()
+		async with aiohttp.ClientSession(headers=HEADERS) as session:
+			async with session.get(tree_url) as response:
+				response.raise_for_status()
+				tree_data = await response.json()
 
 		if tree_data.get('truncated', False):
 			console.print('[yellow]Warning: Repository tree is truncated. Some files may be missing.[/]')
@@ -192,7 +192,7 @@ async def main():
 
 	console.print(
 		Panel.fit(
-			f'[bold cyan]Svelte Repository Explorer[/]\n[green]{repo}[/] (branch: [yellow]{branch}[/])',
+			f'[bold cyan]Downloading relevant Svelte files for LLM[/]\n[green]{repo}[/] (branch: [yellow]{branch}[/])',
 			border_style='cyan',
 		)
 	)
@@ -216,7 +216,6 @@ async def main():
 		tree = generate_tree_structure(files)
 
 		# Display the tree in terminal
-		console.print('\nRepository Structure:')
 		console.print(tree)
 
 		# Capture tree as string for markdown
@@ -226,7 +225,8 @@ async def main():
 		tree_md = str_io.getvalue()
 
 		# Generate markdown content
-		repo_name = repo.split('/')[-1]  # This handles both owner/repo and URL formats
+		# This handles both owner/repo and URL formats
+		repo_name = repo.split('/')[-1]
 		md_content = f'# {repo_name} Project Structure\n\n'
 		md_content += '## File Tree\n\n'
 		md_content += f'```\n{tree_md}\n```\n\n'
