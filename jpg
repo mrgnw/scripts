@@ -1,0 +1,12 @@
+#!/usr/bin/env zsh
+
+if [[ -z "$1" ]]; then
+	echo "Usage: heic_to_jpg <input_file.heic> [output_file.jpg]"
+	return 1
+fi
+
+local input_file="$1"
+local output_file="${2:-${input_file%.*}.jpg}"
+
+sips -s format jpeg "$input_file" --out "$output_file"
+echo "Converted to $output_file"

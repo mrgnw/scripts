@@ -1,0 +1,8 @@
+#!/bin/bash
+
+if [ $# -eq 1 ]; then
+    base="${1%.*}"
+    cjxl "$1" "${base}.jxl"
+else
+    cjxl "$@"
+fi
