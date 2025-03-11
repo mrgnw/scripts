@@ -159,8 +159,9 @@ def generate_tree_structure(files):
 			tree_node.add(file)
 
 	build_tree(path_dict, tree)
-	
+
 	return tree
+
 
 async def main():
 	# Parse command line arguments
@@ -213,9 +214,9 @@ async def main():
 
 		# Generate tree structure
 		tree = generate_tree_structure(files)
-		
+
 		# Display the tree in terminal
-		console.print("\nRepository Structure:")
+		console.print('\nRepository Structure:')
 		console.print(tree)
 
 		# Capture tree as string for markdown
