@@ -29,20 +29,18 @@ HEADERS = (
 # Initialize rich console
 console = Console()
 
-# Svelte project file patterns
+# Simplified project file patterns
 SVELTE_PATTERNS = [
-	'package.json',
-	'svelte.config.js',
-	'vite.config.js',
-	'vite.config.ts',
-	'src/routes/**/*.svelte',
-	'src/routes/**/*.js',
-	'src/routes/**/*.ts',
-	'src/lib/**/*.svelte',
-	'src/lib/**/*.js',
-	'src/lib/**/*.ts',
-	'src/app.html',
-	'src/app.d.ts',
+    # Key configuration files
+    'package.json',
+    'svelte.config.js',
+    'vite.config.js',
+    'vite.config.ts',
+    # All relevant file types throughout the project
+    '**/*.json',
+    '**/*.js',
+    '**/*.ts',
+    '**/*.svelte',
 ]
 
 
