@@ -159,14 +159,8 @@ def generate_tree_structure(files):
 			tree_node.add(file)
 
 	build_tree(path_dict, tree)
-
-	# Capture the tree as a string
-	str_io = io.StringIO()
-	console_capture = Console(file=str_io, width=100)
-	console_capture.print(tree)
-
-	return str_io.getvalue()
-
+	
+	return tree
 
 async def main():
 	# Parse command line arguments
@@ -218,7 +212,17 @@ async def main():
 		console.print(f'Successfully fetched [bold green]{len(file_contents)}/{len(files)}[/] files')
 
 		# Generate tree structure
-		tree_md = generate_tree_structure(files)
+		tree = generate_tree_structure(files)
+		
+		# Display the tree in terminal
+		console.print("\nRepository Structure:")
+		console.print(tree)
+
+		# Capture tree as string for markdown
+		str_io = io.StringIO()
+		console_capture = Console(file=str_io, width=100)
+		console_capture.print(tree)
+		tree_md = str_io.getvalue()
 
 		# Generate markdown content
 		repo_name = repo.split('/')[-1]  # This handles both owner/repo and URL formats
