@@ -1,6 +1,8 @@
+This is the wild west. No apologies, just don't set your expectations too high.
+
 # Scripts
 
-Isolated files that can be run directly once they are given execution permissions with `chmod +x script_path` and are added to the PATH
+Isolated files that can be run directly once they are given execution permissions with `chmod +x script_path` and are added to the PATH.
 
 ## Languages
 
