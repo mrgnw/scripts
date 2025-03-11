@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "requests", 
+#     "requests",
 #     "aiohttp",
 #     "rich"
 # ]
@@ -23,7 +23,7 @@ DEFAULT_BRANCH = 'main'
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 OUTPUT_FILE = 'repo_files.md'
 HEADERS = (
-    {'Authorization': f'bearer {GITHUB_TOKEN}', 'Content-Type': 'application/json'} if GITHUB_TOKEN else {}
+	{'Authorization': f'bearer {GITHUB_TOKEN}', 'Content-Type': 'application/json'} if GITHUB_TOKEN else {}
 )
 
 # Initialize rich console
@@ -31,231 +31,233 @@ console = Console()
 
 # Svelte project file patterns
 SVELTE_PATTERNS = [
-    'package.json',
-    'svelte.config.js',
-    'vite.config.js',
-    'vite.config.ts',
-    'src/routes/**/*.svelte',
-    'src/routes/**/*.js',
-    'src/routes/**/*.ts',
-    'src/lib/**/*.svelte',
-    'src/lib/**/*.js',
-    'src/lib/**/*.ts',
-    'src/app.html',
-    'src/app.d.ts',
+	'package.json',
+	'svelte.config.js',
+	'vite.config.js',
+	'vite.config.ts',
+	'src/routes/**/*.svelte',
+	'src/routes/**/*.js',
+	'src/routes/**/*.ts',
+	'src/lib/**/*.svelte',
+	'src/lib/**/*.js',
+	'src/lib/**/*.ts',
+	'src/app.html',
+	'src/app.d.ts',
 ]
 
 
 async def fetch_repo_files(repo, branch='main'):
-    """Fetch all files matching patterns from a repository."""
-    owner, name = repo.split('/')
-    
-    # Check repository and get default branch if needed
-    with console.status("[bold green]Checking repository...", spinner="dots"):
-        url = f"https://api.github.com/repos/{owner}/{name}"
-        response = requests.get(url, headers=HEADERS)
-        response.raise_for_status()
-        repo_info = response.json()
-        
-        if branch == 'main' and repo_info['default_branch'] != 'main':
-            branch = repo_info['default_branch']
-            console.print(f"[yellow]Using default branch:[/] [bold cyan]{branch}[/]")
-    
-    # Get repository contents using Git Trees API
-    with console.status("[bold green]Fetching repository structure...", spinner="dots"):
-        tree_url = f"https://api.github.com/repos/{owner}/{name}/git/trees/{branch}?recursive=1"
-        response = requests.get(tree_url, headers=HEADERS)
-        response.raise_for_status()
-        tree_data = response.json()
-        
-        if tree_data.get('truncated', False):
-            console.print("[yellow]Warning: Repository tree is truncated. Some files may be missing.[/]")
-        
-        # Filter files based on patterns
-        matching_files = []
-        for item in tree_data.get('tree', []):
-            if item['type'] == 'blob' and any(fnmatch(item['path'], pattern) for pattern in SVELTE_PATTERNS):
-                matching_files.append({'path': item['path']})
-    
-    console.print(f"Found [bold green]{len(matching_files)}[/] matching files.")
-    return matching_files
+	"""Fetch all files matching patterns from a repository."""
+	owner, name = repo.split('/')
+
+	# Check repository and get default branch if needed
+	with console.status('[bold green]Checking repository...', spinner='dots'):
+		url = f'https://api.github.com/repos/{owner}/{name}'
+		response = requests.get(url, headers=HEADERS)
+		response.raise_for_status()
+		repo_info = response.json()
+
+		if branch == 'main' and repo_info['default_branch'] != 'main':
+			branch = repo_info['default_branch']
+			console.print(f'[yellow]Using default branch:[/] [bold cyan]{branch}[/]')
+
+	# Get repository contents using Git Trees API
+	with console.status('[bold green]Fetching repository structure...', spinner='dots'):
+		tree_url = f'https://api.github.com/repos/{owner}/{name}/git/trees/{branch}?recursive=1'
+		response = requests.get(tree_url, headers=HEADERS)
+		response.raise_for_status()
+		tree_data = response.json()
+
+		if tree_data.get('truncated', False):
+			console.print('[yellow]Warning: Repository tree is truncated. Some files may be missing.[/]')
+
+		# Filter files based on patterns
+		matching_files = []
+		for item in tree_data.get('tree', []):
+			if item['type'] == 'blob' and any(fnmatch(item['path'], pattern) for pattern in SVELTE_PATTERNS):
+				matching_files.append({'path': item['path']})
+
+	console.print(f'Found [bold green]{len(matching_files)}[/] matching files.')
+	return matching_files
 
 
 async def fetch_file_contents(repo, files, branch):
-    """Fetch file contents asynchronously with progress tracking."""
-    owner, name = repo.split('/')
-    results = []
-    
-    with Progress(
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-    ) as progress:
-        overall_task = progress.add_task(f"[cyan]Downloading files...", total=len(files))
-        
-        async with aiohttp.ClientSession() as session:
-            # Process in batches to avoid rate limits
-            batch_size = 5
-            for i in range(0, len(files), batch_size):
-                batch = files[i:i+batch_size]
-                batch_tasks = []
-                
-                for file in batch:
-                    url = f"https://raw.githubusercontent.com/{owner}/{name}/{branch}/{file['path']}"
-                    task = asyncio.create_task(fetch_single_file(session, url, file['path']))
-                    batch_tasks.append(task)
-                
-                # Wait for batch to complete
-                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                
-                for j, result in enumerate(batch_results):
-                    file_path = batch[j]['path']
-                    if isinstance(result, Exception):
-                        console.print(f"[red]Error fetching {file_path}: {result}[/]")
-                    else:
-                        results.append({'path': file_path, 'content': result})
-                
-                progress.update(overall_task, advance=len(batch))
-    
-    return results
+	"""Fetch file contents asynchronously with progress tracking."""
+	owner, name = repo.split('/')
+	results = []
+
+	with Progress(
+		TextColumn('[bold blue]{task.description}'),
+		BarColumn(),
+		TextColumn('[progress.percentage]{task.percentage:>3.0f}%'),
+		TimeRemainingColumn(),
+	) as progress:
+		overall_task = progress.add_task(f'[cyan]Downloading files...', total=len(files))
+
+		async with aiohttp.ClientSession() as session:
+			# Process in batches to avoid rate limits
+			batch_size = 5
+			for i in range(0, len(files), batch_size):
+				batch = files[i : i + batch_size]
+				batch_tasks = []
+
+				for file in batch:
+					url = f"https://raw.githubusercontent.com/{owner}/{name}/{branch}/{file['path']}"
+					task = asyncio.create_task(fetch_single_file(session, url, file['path']))
+					batch_tasks.append(task)
+
+				# Wait for batch to complete
+				batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+				for j, result in enumerate(batch_results):
+					file_path = batch[j]['path']
+					if isinstance(result, Exception):
+						console.print(f'[red]Error fetching {file_path}: {result}[/]')
+					else:
+						results.append({'path': file_path, 'content': result})
+
+				progress.update(overall_task, advance=len(batch))
+
+	return results
 
 
 async def fetch_single_file(session, url, path):
-    """Fetch a single file's content."""
-    async with session.get(url) as response:
-        if response.status != 200:
-            raise ValueError(f"Failed to fetch file: {response.status}")
-        return await response.text()
+	"""Fetch a single file's content."""
+	async with session.get(url) as response:
+		if response.status != 200:
+			raise ValueError(f'Failed to fetch file: {response.status}')
+		return await response.text()
 
 
 def generate_tree_structure(files):
-    """Generate a tree structure for the output markdown."""
-    # Build directory tree dictionary
-    path_dict = {}
-    for file in files:
-        parts = file['path'].split('/')
-        current = path_dict
-        for i, part in enumerate(parts):
-            if i == len(parts) - 1:  # File
-                if 'files' not in current:
-                    current['files'] = []
-                current['files'].append(part)
-            else:  # Directory
-                if part not in current:
-                    current[part] = {}
-                current = current[part]
-    
-    # Build markdown tree representation
-    lines = []
-    
-    def build_tree(node, prefix=""):
-        items = sorted([(k, v) for k, v in node.items() if k != "files"])
-        files = node.get("files", [])
-        
-        # Process directories
-        for i, (name, contents) in enumerate(items):
-            is_last = (i == len(items) - 1 and not files)
-            if is_last:
-                lines.append(f"{prefix}└── 📁 {name}/")
-                build_tree(contents, prefix + "    ")
-            else:
-                lines.append(f"{prefix}├── 📁 {name}/")
-                build_tree(contents, prefix + "│   ")
-        
-        # Process files
-        for i, file in enumerate(sorted(files)):
-            is_last = (i == len(files) - 1)
-            ext = file.split('.')[-1] if '.' in file else ''
-            
-            icon = "📄"
-            if ext in ['js', 'ts']:
-                icon = "🟨"
-            elif ext == 'json':
-                icon = "🔧"
-            elif ext == 'svelte':
-                icon = "🔥"
-            
-            if is_last:
-                lines.append(f"{prefix}└── {icon} {file}")
-            else:
-                lines.append(f"{prefix}├── {icon} {file}")
-    
-    build_tree(path_dict)
-    return "\n".join(lines)
+	"""Generate a tree structure for the output markdown."""
+	# Build directory tree dictionary
+	path_dict = {}
+	for file in files:
+		parts = file['path'].split('/')
+		current = path_dict
+		for i, part in enumerate(parts):
+			if i == len(parts) - 1:  # File
+				if 'files' not in current:
+					current['files'] = []
+				current['files'].append(part)
+			else:  # Directory
+				if part not in current:
+					current[part] = {}
+				current = current[part]
+
+	# Build markdown tree representation
+	lines = []
+
+	def build_tree(node, prefix=''):
+		items = sorted([(k, v) for k, v in node.items() if k != 'files'])
+		files = node.get('files', [])
+
+		# Process directories
+		for i, (name, contents) in enumerate(items):
+			is_last = i == len(items) - 1 and not files
+			if is_last:
+				lines.append(f'{prefix}└── 📁 {name}/')
+				build_tree(contents, prefix + '    ')
+			else:
+				lines.append(f'{prefix}├── 📁 {name}/')
+				build_tree(contents, prefix + '│   ')
+
+		# Process files
+		for i, file in enumerate(sorted(files)):
+			is_last = i == len(files) - 1
+			ext = file.split('.')[-1] if '.' in file else ''
+
+			icon = '📄'
+			if ext in ['js', 'ts']:
+				icon = '🟨'
+			elif ext == 'json':
+				icon = '🔧'
+			elif ext == 'svelte':
+				icon = '🔥'
+
+			if is_last:
+				lines.append(f'{prefix}└── {icon} {file}')
+			else:
+				lines.append(f'{prefix}├── {icon} {file}')
+
+	build_tree(path_dict)
+	return '\n'.join(lines)
 
 
 async def main():
-    # Parse command line arguments
-    if len(sys.argv) < 2:
-        console.print("[bold red]Error:[/] Please provide a repository name (owner/repo) or URL")
-        sys.exit(1)
-        
-    # Parse repo from argument (handle URLs too)
-    repo_arg = sys.argv[1]
-    if repo_arg.startswith("https://"):
-        parts = repo_arg.strip('/').split('/')
-        if len(parts) >= 4 and parts[2] in ['github.com', 'www.github.com']:
-            repo = f"{parts[-2]}/{parts[-1]}"
-        else:
-            console.print("[bold red]Error:[/] Invalid GitHub URL format")
-            sys.exit(1)
-    else:
-        repo = repo_arg
-    
-    # Get output file path (optional second argument)
-    output_file = sys.argv[2] if len(sys.argv) > 2 else OUTPUT_FILE
-    
-    # Get branch (optional --branch argument)
-    branch = DEFAULT_BRANCH
-    if "--branch" in sys.argv and sys.argv.index("--branch") + 1 < len(sys.argv):
-        branch_idx = sys.argv.index("--branch") + 1
-        branch = sys.argv[branch_idx]
-    
-    console.print(Panel.fit(
-        f"[bold cyan]Svelte Repository Explorer[/]\n[green]{repo}[/] (branch: [yellow]{branch}[/])",
-        border_style="cyan"
-    ))
-    
-    try:
-        # Fetch matching files
-        files = await fetch_repo_files(repo, branch)
-        if not files:
-            console.print("[yellow]No Svelte project files found in repository.[/]")
-            return
-        
-        # Sort files for consistent output
-        files.sort(key=lambda f: f['path'])
-        
-        # Fetch file contents
-        file_contents = await fetch_file_contents(repo, files, branch)
-        console.print(f"Successfully fetched [bold green]{len(file_contents)}/{len(files)}[/] files")
-        
-        # Generate tree structure
-        tree_md = generate_tree_structure(files)
-        
-        # Generate markdown content
-        repo_name = repo.split('/')[1]
-        md_content = f'# {repo_name} Project Structure\n\n'
-        md_content += "## File Tree\n\n"
-        md_content += tree_md
-        md_content += "\n\n## File Contents\n\n"
-        
-        # Add file contents
-        for file in file_contents:
-            file_path = file['path']
-            content = file['content']
-            ext = file_path.split('.')[-1] if '.' in file_path else ''
-            md_content += f"### {file_path}\n\n```{ext}\n{content}\n```\n\n"
-        
-        # Write to file
-        Path(output_file).write_text(md_content, encoding='utf-8')
-        console.print(f"[bold green]Generated:[/] {output_file}")
-        
-    except Exception as e:
-        console.print(f"[bold red]Error:[/] {e}")
-        sys.exit(1)
+	# Parse command line arguments
+	if len(sys.argv) < 2:
+		console.print('[bold red]Error:[/] Please provide a repository name (owner/repo) or URL')
+		sys.exit(1)
+
+	# Parse repo from argument (handle URLs too)
+	repo_arg = sys.argv[1]
+	if repo_arg.startswith('https://'):
+		parts = repo_arg.strip('/').split('/')
+		if len(parts) >= 4 and parts[2] in ['github.com', 'www.github.com']:
+			repo = f'{parts[-2]}/{parts[-1]}'
+		else:
+			console.print('[bold red]Error:[/] Invalid GitHub URL format')
+			sys.exit(1)
+	else:
+		repo = repo_arg
+
+	# Get output file path (optional second argument)
+	output_file = sys.argv[2] if len(sys.argv) > 2 else OUTPUT_FILE
+
+	# Get branch (optional --branch argument)
+	branch = DEFAULT_BRANCH
+	if '--branch' in sys.argv and sys.argv.index('--branch') + 1 < len(sys.argv):
+		branch_idx = sys.argv.index('--branch') + 1
+		branch = sys.argv[branch_idx]
+
+	console.print(
+		Panel.fit(
+			f'[bold cyan]Svelte Repository Explorer[/]\n[green]{repo}[/] (branch: [yellow]{branch}[/])',
+			border_style='cyan',
+		)
+	)
+
+	try:
+		# Fetch matching files
+		files = await fetch_repo_files(repo, branch)
+		if not files:
+			console.print('[yellow]No Svelte project files found in repository.[/]')
+			return
+
+		# Sort files for consistent output
+		files.sort(key=lambda f: f['path'])
+
+		# Fetch file contents
+		file_contents = await fetch_file_contents(repo, files, branch)
+		console.print(f'Successfully fetched [bold green]{len(file_contents)}/{len(files)}[/] files')
+
+		# Generate tree structure
+		tree_md = generate_tree_structure(files)
+
+		# Generate markdown content
+		repo_name = repo.split('/')[1]
+		md_content = f'# {repo_name} Project Structure\n\n'
+		md_content += '## File Tree\n\n'
+		md_content += tree_md
+		md_content += '\n\n## File Contents\n\n'
+
+		# Add file contents
+		for file in file_contents:
+			file_path = file['path']
+			content = file['content']
+			ext = file_path.split('.')[-1] if '.' in file_path else ''
+			md_content += f'### {file_path}\n\n```{ext}\n{content}\n```\n\n'
+
+		# Write to file
+		Path(output_file).write_text(md_content, encoding='utf-8')
+		console.print(f'[bold green]Generated:[/] {output_file}')
+
+	except Exception as e:
+		console.print(f'[bold red]Error:[/] {e}')
+		sys.exit(1)
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+	asyncio.run(main())
