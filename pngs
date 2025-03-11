@@ -1,0 +1,29 @@
+#!/usr/bin/env zsh
+
+# Function to convert SVG to PNG with varying sizes
+svg_to_png() {
+  local svg_file=$1
+  shift  # Shift to remove the SVG file from arguments
+
+  # Ensure rsvg-convert is installed
+  if ! command -v rsvg-convert &> /dev/null; then
+    echo "Error: rsvg-convert is not installed. Install it with 'brew install librsvg'." >&2
+    return 1
+  fi
+
+  # Loop over the sizes passed as arguments
+  for size in "$@"; do
+    local output_file="${svg_file:r}-${size}.png"
+    echo "Converting $svg_file to $output_file with size ${size}x${size}..."
+    rsvg-convert -w $size -h $size "$svg_file" -o "$output_file"
+  done
+}
+
+# Check if correct number of arguments is passed
+if [[ $# -lt 2 ]]; then
+  echo "Usage: $0 <svg-file> <size1> <size2> ... <sizeN>"
+  exit 1
+fi
+
+# Call the conversion function with the provided arguments
+svg_to_png "$@"
