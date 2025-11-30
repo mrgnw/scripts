@@ -42,7 +42,8 @@ def main():
 	file_paths = []
 	chapter_lines = []
 
-	audio_files = sorted([a for a in Path('.').rglob('*') if a.suffix in ['.mp3', '.m4b']])
+	# todo: sort numbers properly
+	audio_files = sorted([a for a in Path('.').rglob('*') if a.suffix in ['.mp3', '.m4b', '.webm']])
 	print(audio_files)
 
 	for file in audio_files:
