@@ -1,0 +1,259 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "rich>=13.0.0",
+#     "questionary>=1.10.0",
+# ]
+# ///
+
+import os
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Dict
+
+from rich.console import Console
+from rich.filesize import decimal
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+import questionary
+
+console = Console()
+
+
+@dataclass
+class DirectorySize:
+	path: Path
+	size_bytes: int
+	parent: Path
+	dtype: str
+
+	@property
+	def size_mb(self) -> float:
+		return self.size_bytes / (1024 * 1024)
+
+	@property
+	def size_display(self) -> str:
+		return decimal(self.size_bytes)
+
+
+def get_dir_size(path: Path) -> int:
+	"""Get total size of a directory in bytes."""
+	try:
+		# macOS uses BSD du which doesn't support -b, use -A -s instead
+		result = subprocess.run(["du", "-A", "-s", str(path)], capture_output=True, text=True, timeout=10)
+		if result.returncode == 0:
+			return int(result.stdout.split()[0]) * 512  # BSD du uses 512-byte blocks by default
+	except (subprocess.TimeoutExpired, ValueError, IndexError):
+		pass
+	return 0
+
+
+def find_target_dirs(root: Path, target_names: List[str]) -> List[DirectorySize]:
+	"""Find all target directories under root."""
+	results = []
+
+	with Progress(
+		SpinnerColumn(),
+		TextColumn("[progress.description]{task.description}"),
+		console=console,
+		transient=True,
+	) as progress:
+		task = progress.add_task("Scanning directory tree...", total=None)
+
+		for current_dir, dirs, files in os.walk(root):
+			progress.update(task, description=f"Scanning {current_dir}...")
+
+			# Check for target directories in current location
+			for target_name in target_names:
+				target_path = Path(current_dir) / target_name
+				if target_path.exists() and target_path.is_dir():
+					size = get_dir_size(target_path)
+					if size > 0:
+						results.append(
+							DirectorySize(path=target_path, size_bytes=size, parent=Path(current_dir), dtype=target_name)
+						)
+
+			# Don't recurse into target directories themselves to avoid nested scanning
+			dirs[:] = [d for d in dirs if d not in target_names]
+
+	return results
+
+
+def format_path(dir_info: DirectorySize, root: Path) -> str:
+	"""Format path relative to root, showing the full path to target dir."""
+	try:
+		rel_parent = dir_info.parent.relative_to(root)
+		return f"{rel_parent}/{dir_info.path.name}"
+	except ValueError:
+		return str(dir_info.path)
+
+
+def create_bar(size_bytes: int, max_size_bytes: int, width: int = 20) -> str:
+	"""Create a simple ASCII bar chart."""
+	if max_size_bytes == 0:
+		return "█" * 0
+	percentage = size_bytes / max_size_bytes
+	filled = int(percentage * width)
+	return "█" * filled + "░" * (width - filled)
+
+
+def interactive_selection(filtered_dirs: List[DirectorySize], root: Path, total_size: int, by_type: Dict[str, List[DirectorySize]]) -> List[DirectorySize]:
+	"""Interactive selection UI for choosing directories to delete."""
+
+	# Create checkbox list grouped by type
+	choices = []
+	choice_to_dir = {}
+
+	for dtype in sorted(by_type.keys()):
+		dirs_of_type = sorted(by_type[dtype], key=lambda x: x.size_bytes, reverse=True)
+		type_total = sum(d.size_bytes for d in dirs_of_type)
+
+		# Add category header
+		choices.append(questionary.Separator(f"\n{dtype.upper()} ({len(dirs_of_type)} dirs, {decimal(type_total)})"))
+
+		# Add directories under this category
+		for dir_info in dirs_of_type:
+			location = format_path(dir_info, root)
+			percentage = (dir_info.size_bytes / total_size) * 100
+			display = f"{location:50} {dir_info.size_display:>12} ({percentage:5.1f}%)"
+			idx = len(choices)
+			choices.append(display)
+			choice_to_dir[idx] = dir_info
+
+	# Show checkbox selection
+	selected_indices = questionary.checkbox(
+		"Select directories to delete (use [SPACE] to select, [ENTER] to confirm):",
+		choices=choices,
+	).ask()
+
+	if selected_indices is None:
+		return []
+
+	# Map selected indices back to directories
+	selected = []
+	for idx in selected_indices:
+		if idx in choice_to_dir:
+			selected.append(choice_to_dir[idx])
+
+	return selected
+
+
+def confirm_deletion(dirs_to_delete: List[DirectorySize]) -> bool:
+	"""Ask for confirmation before deletion."""
+	console.clear()
+	total_size = sum(d.size_bytes for d in dirs_to_delete)
+
+	console.print(f"[bold red]Confirm Deletion[/bold red]\n")
+	console.print(f"You are about to delete the following directories:\n")
+
+	for dir_info in dirs_to_delete:
+		console.print(f"  • {dir_info.path} ({dir_info.size_display})")
+
+	console.print(f"\n[bold yellow]Total size to delete: {decimal(total_size)}[/bold yellow]\n")
+
+	response = questionary.confirm("Proceed with deletion?").ask()
+	return response is True
+
+
+def delete_directories(dirs_to_delete: List[DirectorySize]) -> None:
+	"""Delete the selected directories."""
+	with Progress(
+		SpinnerColumn(),
+		TextColumn("[progress.description]{task.description}"),
+		BarColumn(),
+		TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+		console=console,
+	) as progress:
+		task = progress.add_task("Deleting...", total=len(dirs_to_delete))
+
+		for dir_info in dirs_to_delete:
+			try:
+				progress.update(task, description=f"Deleting {dir_info.path.name}...")
+				if dir_info.path.exists():
+					shutil.rmtree(dir_info.path)
+					progress.advance(task)
+			except Exception as e:
+				console.print(f"[red]Error deleting {dir_info.path}: {e}[/red]")
+				progress.advance(task)
+
+	console.print("[bold green]✓ Deletion complete![/bold green]")
+
+
+def main():
+	root = Path.home() / "dev"
+
+	if not root.exists():
+		console.print(f"[red]Error: {root} does not exist[/red]")
+		sys.exit(1)
+
+	target_dirs = ["node_modules", ".venv", ".git", "docker"]
+	min_size_mb = 50
+
+	console.print(f"[cyan]Analyzing disk usage in {root}[/cyan]")
+	console.print(f"[cyan]Target directories: {', '.join(target_dirs)}[/cyan]")
+	console.print(f"[cyan]Minimum size filter: {min_size_mb}MB[/cyan]\n")
+
+	# Find all target directories
+	all_dirs = find_target_dirs(root, target_dirs)
+
+	# Filter by minimum size
+	filtered_dirs = [d for d in all_dirs if d.size_mb >= min_size_mb]
+	filtered_dirs.sort(key=lambda x: x.size_bytes, reverse=True)
+
+	if not filtered_dirs:
+		console.print(f"[yellow]No directories found larger than {min_size_mb}MB[/yellow]")
+		return
+
+	total_size = sum(d.size_bytes for d in filtered_dirs)
+	max_size = filtered_dirs[0].size_bytes
+
+	# Group by type
+	by_type = {}
+	for dir_info in filtered_dirs:
+		dtype = dir_info.dtype
+		if dtype not in by_type:
+			by_type[dtype] = []
+		by_type[dtype].append(dir_info)
+
+	# Display summary
+	console.print(f"[bold cyan]📊 Disk Space Usage Summary[/bold cyan]\n")
+
+	for dtype in sorted(by_type.keys()):
+		dirs_of_type = sorted(by_type[dtype], key=lambda x: x.size_bytes, reverse=True)
+		type_total = sum(d.size_bytes for d in dirs_of_type)
+		type_percentage = (type_total / total_size) * 100
+
+		console.print(f"[bold magenta]{dtype}[/bold magenta] ({len(dirs_of_type)} dirs) [yellow]{decimal(type_total)}[/yellow] ({type_percentage:.1f}%)")
+		for dir_info in dirs_of_type:
+			bar = create_bar(dir_info.size_bytes, max_size)
+			location = format_path(dir_info, root)
+			dir_percentage = (dir_info.size_bytes / total_size) * 100
+			console.print(f"  {location} [cyan]{bar}[/cyan] {dir_info.size_display} ({dir_percentage:.1f}%)")
+
+	console.print()
+	console.print(f"[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+	console.print(f"[bold]Total size (filtered): {decimal(total_size)}[/bold]")
+	console.print(f"[bold]Number of directories: {len(filtered_dirs)}[/bold]")
+	console.print(f"[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n")
+
+	# Interactive selection
+	selected = interactive_selection(filtered_dirs, root, total_size, by_type)
+
+	if not selected:
+		console.print("[yellow]No directories selected for deletion[/yellow]")
+		return
+
+	# Confirm deletion
+	if not confirm_deletion(selected):
+		console.print("[yellow]Deletion cancelled[/yellow]")
+		return
+
+	# Delete
+	delete_directories(selected)
+
+
+if __name__ == "__main__":
+	main()
