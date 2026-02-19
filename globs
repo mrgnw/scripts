@@ -1,0 +1,83 @@
+#!/usr/bin/env zsh
+
+usage() {
+    echo "Usage: $(basename "$0") <images|videos|media> [-x ext ...]" >&2
+    echo >&2
+    echo "Prints glob patterns one per line for use in scripts." >&2
+    echo >&2
+    echo "  images  — raster images, raw formats, and modern compressed formats" >&2
+    echo "  videos  — common video container formats" >&2
+    echo "  media   — both images and videos" >&2
+    echo >&2
+    echo "Options:" >&2
+    echo "  -x, --exclude ext [ext ...]  exclude one or more extensions (without leading dot)" >&2
+    echo >&2
+    echo "Examples:" >&2
+    echo "  $(basename "$0") images -x heic heif" >&2
+    echo "  $(basename "$0") images -x jpg jpeg" >&2
+    echo "  $(basename "$0") videos -x wmv flv" >&2
+    exit 1
+}
+
+print_images() {
+    print -l \
+        "*.jpg" "*.jpeg" \
+        "*.png" "*.gif" "*.bmp" \
+        "*.tiff" "*.tif" "*.tga" \
+        "*.webp" "*.avif" \
+        "*.heic" "*.heif" \
+        "*.jxl" \
+        "*.arw" "*.dng" "*.raw" \
+        "*.psd"
+}
+
+print_videos() {
+    print -l \
+        "*.mp4" "*.m4v" \
+        "*.mov" \
+        "*.mkv" \
+        "*.avi" \
+        "*.webm" \
+        "*.ts" "*.mts" "*.m2ts" \
+        "*.wmv" "*.flv"
+}
+
+# Parse type
+case "${1:-}" in
+    images|img|i)       type=images ;;
+    videos|video|vid|v) type=videos ;;
+    media|all)          type=media ;;
+    *)                  usage ;;
+esac
+shift
+
+# Parse -x / --exclude
+excludes=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -x|--exclude)
+            shift
+            while [[ $# -gt 0 && "$1" != -* ]]; do
+                excludes+=("$1")
+                shift
+            done
+            ;;
+        *) usage ;;
+    esac
+done
+
+emit() {
+    case "$type" in
+        images) print_images ;;
+        videos) print_videos ;;
+        media)  print_images; print_videos ;;
+    esac
+}
+
+if [[ ${#excludes[@]} -gt 0 ]]; then
+    pattern=$(printf "%s|" "${excludes[@]}")
+    pattern="\.(${pattern%|})$"
+    emit | grep -vEi "$pattern"
+else
+    emit
+fi

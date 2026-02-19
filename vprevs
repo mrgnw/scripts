@@ -1,9 +1,7 @@
 #!/usr/bin/env zsh
 setopt localoptions nocaseglob
 
-extensions=(
-    "*.mp4" "*.mov" "*.avi" "*.mkv"
-)
+extensions=(${(f)"$(globs videos)"})
 
 find . -maxdepth 1 -type f \( \
     $(printf -- "-iname %s -o " "${extensions[@]}" | sed 's/ -o $//') \

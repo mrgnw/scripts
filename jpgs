@@ -1,0 +1,36 @@
+#!/usr/bin/env zsh
+
+setopt localoptions nocaseglob
+
+extensions=(${(f)"$(globs images -x jpg jpeg)"})
+
+if [[ $# -gt 0 ]]; then
+    files=("$@")
+else
+    files=()
+    while IFS= read -r -d '' f; do
+        files+=("$f")
+    done < <(find . -maxdepth 1 -type f \( \
+        $(printf -- "-iname %s -o " "${extensions[@]}") \
+        -false \) -print0)
+fi
+
+if [[ ${#files[@]} -eq 0 ]]; then
+    echo "No image files found." >&2
+    exit 0
+fi
+
+mkdir -p original
+
+printf '%s\0' "${files[@]}" | \
+    parallel -0 -j "$(sysctl -n hw.ncpu)" '
+        original_file={}
+        jpg_file="${original_file%.*}.jpg"
+        jpg "$original_file"
+
+        if [[ -f "$jpg_file" ]]; then
+            touch -r "$original_file" "$jpg_file"
+        fi
+
+        mv "$original_file" original/
+    '
