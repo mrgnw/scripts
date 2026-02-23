@@ -1,0 +1,6 @@
+#!/bin/zsh
+
+find . -mindepth 1 -maxdepth 1 -type d -exec test -d "{}/.git" \; -print | parallel -j 0 'echo "Fetching in {}" && git -C {} fetch'
+
+# mprocs version doesn't work yet
+# find . -mindepth 1 -maxdepth 1 -type d -exec test -d "{}/.git" \; -print | awk '{print "echo Fetching in "$1" && git -C "$1" fetch"}' | xargs mprocs --

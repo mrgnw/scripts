@@ -1,0 +1,26 @@
+#!/bin/zsh
+
+# Bulk process all PDFs in a folder in parallel
+# Usage: pdf-compress-img-bulk [num_parallel_jobs]
+
+folder="${1:-.}"  # Default to current directory
+num_jobs="${2:-0}"  # Default to 0 (use all available cores)
+
+if [[ ! -d "$folder" ]]; then
+  echo "Error: Directory '$folder' does not exist"
+  exit 1
+fi
+
+# Count PDFs
+pdf_count=$(find "$folder" -maxdepth 1 -type f -name "*.pdf" | wc -l)
+if [[ $pdf_count -eq 0 ]]; then
+  echo "No PDFs found in '$folder'"
+  exit 0
+fi
+
+echo "Found $pdf_count PDF(s). Starting parallel compression..."
+
+# Process each PDF in parallel using gnu parallel
+find "$folder" -maxdepth 1 -type f -name "*.pdf" | parallel -j "$num_jobs" pdf-compress-img
+
+echo "Bulk compression complete!"

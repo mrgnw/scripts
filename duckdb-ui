@@ -1,0 +1,22 @@
+#! /usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "duckdb",
+# ]
+# ///
+
+from sys import stdin
+import duckdb
+
+
+print('Hello from duck-ui!')
+# run `CALL start_ui()` on duckdb
+conn = duckdb.connect()
+conn.execute('CALL start_ui()')
+# keep open
+if stdin.isatty():
+	input('Press Enter to exit...')
+else:
+	print('Running as a daemon; no user interaction.')
+conn.close()

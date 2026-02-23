@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""
+Compare file sizes between original video files and their -faststart versions.
+Shows size differences and percentage changes to help evaluate faststart overhead.
+"""
+
+import os
+import glob
+from pathlib import Path
+
+def human_size(bytes_size):
+    """Convert bytes to human readable format."""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes_size < 1024.0:
+            return f"{bytes_size:.1f} {unit}"
+        bytes_size /= 1024.0
+    return f"{bytes_size:.1f} TB"
+
+def find_faststart_pairs():
+    """Find original and -faststart file pairs in current directory."""
+    pairs = []
+
+    # Look for -faststart.mp4 files
+    faststart_files = glob.glob("*-faststart.mp4")
+
+    for faststart_file in faststart_files:
+        # Remove -faststart suffix to get original name
+        base_name = faststart_file.replace("-faststart.mp4", "")
+
+        # Look for original with various extensions
+        video_exts = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'flv', 'wmv', 'mpg', 'mpeg', 'ts', 'm2ts', '3gp', 'vob']
+
+        for ext in video_exts:
+            original_candidate = f"{base_name}.{ext}"
+            if os.path.exists(original_candidate):
+                pairs.append((original_candidate, faststart_file))
+                break
+
+    return pairs
+
+def compare_files():
+    """Compare file sizes and show results."""
+    pairs = find_faststart_pairs()
+
+    if not pairs:
+        print("No original/-faststart file pairs found in current directory.")
+        print("Run 'muxs' first to create -faststart versions.")
+        return
+
+    print(f"{'Original':<25} {'Faststart':<25} {'Size Diff':<12} {'% Change':<10}")
+    print("-" * 80)
+
+    total_original = 0
+    total_faststart = 0
+
+    for original, faststart in pairs:
+        orig_size = os.path.getsize(original)
+        fast_size = os.path.getsize(faststart)
+
+        total_original += orig_size
+        total_faststart += fast_size
+
+        diff = fast_size - orig_size
+        pct_change = ((fast_size - orig_size) / orig_size) * 100 if orig_size > 0 else 0
+
+        if diff > 0:
+            diff_str = f"+{human_size(diff)}"
+        elif diff < 0:
+            diff_str = f"-{human_size(abs(diff))}"
+        else:
+            diff_str = "0 B"
+        pct_str = f"{pct_change:+.1f}%"
+
+        print(f"{original:<25} {faststart:<25} {diff_str:<12} {pct_str:<10}")
+
+    if len(pairs) > 1:
+        print("-" * 80)
+        total_diff = total_faststart - total_original
+        total_pct = ((total_faststart - total_original) / total_original) * 100 if total_original > 0 else 0
+
+        if total_diff > 0:
+            total_diff_str = f"+{human_size(total_diff)}"
+        elif total_diff < 0:
+            total_diff_str = f"-{human_size(abs(total_diff))}"
+        else:
+            total_diff_str = "0 B"
+        total_pct_str = f"{total_pct:+.1f}%"
+
+        print(f"{'TOTAL':<25} {'':<25} {total_diff_str:<12} {total_pct_str:<10}")
+        print(f"\nOriginal total: {human_size(total_original)}")
+        print(f"Faststart total: {human_size(total_faststart)}")
+
+if __name__ == "__main__":
+    compare_files()

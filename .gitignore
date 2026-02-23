@@ -1,4 +1,14 @@
 .vscode
+*.csv
+*.html
+plan-ideas.md
+overmind
+stitch-rs
+stitch-rust/target/
+ub
+ubermind-serve
+devclean
+
 # Created by https://www.toptal.com/developers/gitignore/api/python,macos,swift,go
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,macos,swift,go
 

@@ -1,0 +1,4 @@
+#!/usr/bin/env zsh
+
+aria2c -s $# -j $# -x $# "$@"
+# aria2c -s $# -j $# -x $# -o "${1##*/}" "$@"

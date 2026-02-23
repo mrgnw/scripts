@@ -1,0 +1,11 @@
+#!/usr/bin/env zsh
+# Usage: git-ignore-globally "pattern"
+
+[[ -z "$1" ]] && { echo "Usage: git-ignore-globally \"pattern\"" >&2; exit 1; }
+
+gitignore_path=$(git config --global core.excludesFile)
+[[ -z "$gitignore_path" ]] && gitignore_path="$HOME/.config/git/ignore" && git config --global core.excludesFile "$gitignore_path"
+
+mkdir -p "$(dirname "$gitignore_path")"
+grep -qxF "$1" "$gitignore_path" 2>/dev/null || echo "$1" >> "$gitignore_path"
+

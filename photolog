@@ -1,0 +1,47 @@
+#!/usr/bin/env zsh
+
+db_path="$HOME/photos_logs.sqlite"
+
+photo_pid=$(pgrep photoanalysisd)
+
+if [[ -z "$photo_pid" ]]; then
+  echo "photoanalysisd is not running."
+  exit 1
+fi
+
+/usr/bin/sqlite3 "$db_path" <<EOF
+CREATE TABLE IF NOT EXISTS logs (
+    log_dt TIMESTAMP,
+    log_level TEXT,
+    process_detail TEXT,
+    message TEXT
+);
+EOF
+
+process_line(){
+	local line="$1"
+
+	if [[ "$line" == "Filtering the log data"* ]]; then
+		return
+	fi
+
+	log_dt=$(echo "$line" | choose 1)
+	log_level=$(echo "$line" | choose 3)
+	process_detail=$(echo "$line" | choose 9 | tr -d '[]')
+	message=$(echo "$line" | choose 10:)
+
+	# tabline=$(echo "$log_dt\t$log_level\t$process_detail\t\"$message\"")
+	# echo "$log_dt ▸ $log_level ▸ $process_detail ▸ \"$message\""
+
+	/usr/bin/sqlite3 "$db_path" <<EOF
+INSERT INTO logs (log_dt, log_level, process_detail, message)
+VALUES ("$log_dt", "$log_level", "$process_detail", "$message");
+EOF
+}
+
+# stream the results
+/usr/bin/log stream --level debug -p "$photo_pid" | while IFS=$'\t' read -r line; do
+    process_line "$line"
+		# touch $HOME/lines.txt
+		# echo "$line" >> "$HOME/lines.txt"
+done

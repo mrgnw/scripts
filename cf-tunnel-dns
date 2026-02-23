@@ -1,0 +1,62 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["pyyaml"]
+# ///
+
+import subprocess
+import sys
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import yaml
+
+CONFIG = Path.home() / ".cloudflared" / "config.yml"
+
+def register(tunnel: str, hostname: str) -> tuple[str, bool, str]:
+	result = subprocess.run(
+		["cloudflared", "tunnel", "route", "dns", tunnel, hostname],
+		capture_output=True,
+		text=True,
+	)
+	combined = result.stdout + result.stderr
+	ok = result.returncode == 0 or "already exists" in combined.lower()
+	return hostname, ok, combined.strip()
+
+def main():
+	config = yaml.safe_load(CONFIG.read_text())
+	tunnel = config["tunnel"]
+
+	hostnames = [
+		rule["hostname"]
+		for rule in config.get("ingress", [])
+		if "hostname" in rule
+	]
+
+	if not hostnames:
+		print("No hostnames found in config.yml")
+		return
+
+	print(f"Tunnel: {tunnel}")
+	print(f"Syncing {len(hostnames)} DNS routes:\n")
+
+	ok = []
+	failed = []
+
+	with ThreadPoolExecutor(max_workers=10) as pool:
+		futures = {pool.submit(register, tunnel, h): h for h in hostnames}
+		for future in as_completed(futures):
+			hostname, success, output = future.result()
+			if success:
+				print(f"  ✓  {hostname}")
+				ok.append(hostname)
+			else:
+				print(f"  ✗  {hostname}")
+				print(f"     {output}")
+				failed.append(hostname)
+
+	print(f"\n{len(ok)} ok, {len(failed)} failed")
+	if failed:
+		sys.exit(1)
+
+if __name__ == "__main__":
+	main()

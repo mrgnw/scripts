@@ -105,7 +105,6 @@ def interactive_selection(filtered_dirs: List[DirectorySize], root: Path, total_
 
 	# Create checkbox list grouped by type
 	choices = []
-	choice_to_dir = {}
 
 	for dtype in sorted(by_type.keys()):
 		dirs_of_type = sorted(by_type[dtype], key=lambda x: x.size_bytes, reverse=True)
@@ -119,47 +118,53 @@ def interactive_selection(filtered_dirs: List[DirectorySize], root: Path, total_
 			location = format_path(dir_info, root)
 			percentage = (dir_info.size_bytes / total_size) * 100
 			display = f"{location:50} {dir_info.size_display:>12} ({percentage:5.1f}%)"
-			idx = len(choices)
-			choices.append(display)
-			choice_to_dir[idx] = dir_info
+			# Use Choice with dir_info as the value
+			choices.append(questionary.Choice(display, value=dir_info))
 
 	# Show checkbox selection
-	selected_indices = questionary.checkbox(
+	selected = questionary.checkbox(
 		"Select directories to delete (use [SPACE] to select, [ENTER] to confirm):",
 		choices=choices,
 	).ask()
 
-	if selected_indices is None:
+	if selected is None:
 		return []
-
-	# Map selected indices back to directories
-	selected = []
-	for idx in selected_indices:
-		if idx in choice_to_dir:
-			selected.append(choice_to_dir[idx])
 
 	return selected
 
 
 def confirm_deletion(dirs_to_delete: List[DirectorySize]) -> bool:
-	"""Ask for confirmation before deletion."""
-	console.clear()
+	"""Ask for confirmation before deletion/cleaning."""
 	total_size = sum(d.size_bytes for d in dirs_to_delete)
 
-	console.print(f"[bold red]Confirm Deletion[/bold red]\n")
-	console.print(f"You are about to delete the following directories:\n")
+	# Separate git directories from others
+	git_dirs = [d for d in dirs_to_delete if d.dtype == ".git"]
+	other_dirs = [d for d in dirs_to_delete if d.dtype != ".git"]
 
-	for dir_info in dirs_to_delete:
-		console.print(f"  • {dir_info.path} ({dir_info.size_display})")
+	console.print(f"\n[bold red]Confirm Action[/bold red]")
 
-	console.print(f"\n[bold yellow]Total size to delete: {decimal(total_size)}[/bold yellow]\n")
+	if git_dirs:
+		console.print(f"[cyan]Git repositories to clean:[/cyan]")
+		for dir_info in git_dirs:
+			console.print(f"  • {dir_info.path} ({dir_info.size_display})")
 
-	response = questionary.confirm("Proceed with deletion?").ask()
+	if other_dirs:
+		console.print(f"[red]Directories to delete:[/red]")
+		for dir_info in other_dirs:
+			console.print(f"  • {dir_info.path} ({dir_info.size_display})")
+
+	console.print(f"\n[bold yellow]Total size affected: {decimal(total_size)}[/bold yellow]\n")
+
+	response = questionary.confirm("Proceed?").ask()
 	return response is True
 
 
 def delete_directories(dirs_to_delete: List[DirectorySize]) -> None:
-	"""Delete the selected directories."""
+	"""Delete or clean the selected directories."""
+	# Separate .git directories from others
+	git_dirs = [d for d in dirs_to_delete if d.dtype == ".git"]
+	other_dirs = [d for d in dirs_to_delete if d.dtype != ".git"]
+
 	with Progress(
 		SpinnerColumn(),
 		TextColumn("[progress.description]{task.description}"),
@@ -167,23 +172,50 @@ def delete_directories(dirs_to_delete: List[DirectorySize]) -> None:
 		TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
 		console=console,
 	) as progress:
-		task = progress.add_task("Deleting...", total=len(dirs_to_delete))
+		task = progress.add_task("Processing...", total=len(dirs_to_delete))
 
-		for dir_info in dirs_to_delete:
+		# Handle .git directories with git gc
+		for dir_info in git_dirs:
+			try:
+				progress.update(task, description=f"Cleaning {dir_info.path.name}...")
+				if dir_info.path.exists():
+					# Run git gc to clean up dead/irrelevant files
+					result = subprocess.run(
+						["git", "gc", "--aggressive", "--prune"],
+						cwd=dir_info.path.parent,
+						capture_output=True,
+						text=True,
+						timeout=120
+					)
+					if result.returncode == 0:
+						console.print(f"[green]✓ Cleaned {dir_info.path}[/green]")
+					else:
+						console.print(f"[yellow]⚠ Warning cleaning {dir_info.path}: {result.stderr}[/yellow]")
+				progress.advance(task)
+			except subprocess.TimeoutExpired:
+				console.print(f"[yellow]⚠ Timeout cleaning {dir_info.path}[/yellow]")
+				progress.advance(task)
+			except Exception as e:
+				console.print(f"[red]Error cleaning {dir_info.path}: {e}[/red]")
+				progress.advance(task)
+
+		# Delete other directories
+		for dir_info in other_dirs:
 			try:
 				progress.update(task, description=f"Deleting {dir_info.path.name}...")
 				if dir_info.path.exists():
 					shutil.rmtree(dir_info.path)
-					progress.advance(task)
+					console.print(f"[green]✓ Deleted {dir_info.path}[/green]")
+				progress.advance(task)
 			except Exception as e:
 				console.print(f"[red]Error deleting {dir_info.path}: {e}[/red]")
 				progress.advance(task)
 
-	console.print("[bold green]✓ Deletion complete![/bold green]")
+	console.print("[bold green]✓ Processing complete![/bold green]")
 
 
 def main():
-	root = Path.home() / "dev"
+	root = Path.cwd()
 
 	if not root.exists():
 		console.print(f"[red]Error: {root} does not exist[/red]")

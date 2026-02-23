@@ -1,0 +1,52 @@
+#! /usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#     "duckdb",
+#     "rich",
+#     "tqdm",
+# ]
+# ///
+
+"""
+walk $1 for xlsx files and convert them to csvs using duckdb
+
+using duckdb's copy command. No need to create a table first.
+
+"""
+
+import os
+from duckdb import connect
+from pathlib import Path
+from tqdm import tqdm  # Added tqdm for progress bar
+
+def main():
+    args = os.sys.argv[1:]
+    if not args:
+        args = ["."]  # Default to current directory if no arguments are provided
+
+    for xlf in map(Path, args):
+        if xlf.is_dir():
+            xlsx_files = list(xlf.glob("*.xlsx"))
+            print(f"Processing {len(xlsx_files)} files in directory: {xlf}")
+            for xl in tqdm(xlsx_files, desc="Converting files"):
+                with connect("") as con:
+                    try:
+                        con.execute(
+                            f"COPY (SELECT * FROM '{xl}') TO '{xl.with_suffix('.csv')}' (FORMAT CSV, HEADER);"
+                        )
+                    except Exception as e:
+                        print(f"Error converting {xl}: {e}")
+                # xl.unlink()
+        else:
+            print(f"Processing file: {xlf}")
+            with connect("") as con:
+                try:
+                    con.execute(
+                        f"COPY (SELECT * FROM '{xlf}') TO '{xlf.with_suffix('.csv')}' (FORMAT CSV, HEADER);"
+                    )
+                except Exception as e:
+                    print(f"Error converting {xlf}: {e}")
+
+if __name__ == "__main__":
+    main()

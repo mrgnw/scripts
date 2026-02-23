@@ -1,0 +1,3 @@
+#!/usr/bin/env zsh
+
+ssh wifi "tailscale up --advertise-exit-node --accept-dns=false --accept-routes --advertise-routes=192.168.1.0/24,192.168.8.0/24"

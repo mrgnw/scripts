@@ -1,0 +1,25 @@
+#!/usr/bin/env zsh
+
+local input_file=${1:-inputs.txt}
+
+# Check if input file exists
+if [[ ! -f "$input_file" ]]; then
+    echo "Input file '$input_file' not found."
+    return 1
+fi
+
+# Read URLs and count them
+local urls=("${(@f)"$(<"$input_file")"}")
+local num_urls=${#urls[@]}
+
+# Set concurrency to the number of URLs
+local concurrency=$num_urls
+
+# Determine the output filename from the first URL (default to basename of the URL)
+local output_file="${urls[1]##*/}"
+
+# Run aria2c with parallel downloads
+aria2c -j "$concurrency" -i "$input_file" -o "$output_file" \
+        --allow-overwrite=true --file-allocation=none
+
+return 0

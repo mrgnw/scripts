@@ -1,0 +1,164 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["rich"]
+# ///
+import subprocess
+import sys
+from datetime import datetime
+from subprocess import check_output
+
+from rich.console import Console
+from rich.text import Text
+
+DEFAULT_LINES = 8
+
+COLORS = {
+	"hash": (90, 70, 140),
+	"date": (102, 91, 255),
+	"time": (79, 164, 255),
+	"dim": (60, 60, 80),
+	"at": (70, 70, 90),
+	"msg": (220, 218, 240),
+	"paren": (100, 100, 120),
+	"head": (255, 249, 86),
+	"main": (104, 244, 255),
+	"branch": (79, 255, 249),
+}
+
+
+def make_fader(day_idx):
+	fade = max(0.85**day_idx, 0.45) if day_idx > 0 else 1.0
+
+	def apply(name):
+		r, g, b = COLORS[name]
+		return f"rgb({int(r * fade)},{int(g * fade)},{int(b * fade)})"
+
+	return apply
+
+
+def parse_commit(line):
+	h, year, month, day, hour, minute, msg, branches = line.split(";", 7)
+	return {
+		"hash": h,
+		"date": (int(year), int(month), int(day)),
+		"time": (hour, minute),
+		"month_day": (month, day),
+		"msg": msg,
+		"branches": branches.strip().strip("()"),
+	}
+
+
+def format_branches(branches, fade):
+	text = Text()
+	if not branches:
+		return text
+
+	text.append(" (", style=fade("paren"))
+
+	for i, branch in enumerate(branches.split(",")):
+		branch = branch.strip()
+		if i > 0:
+			text.append(", ", style=fade("paren"))
+
+		if " -> " in branch:
+			_, branch = branch.split(" -> ")
+			text.append("HEAD", style=f"bold {fade('head')}")
+			text.append(" -> ", style=fade("paren"))
+
+		is_origin = branch.startswith("origin/")
+		name = branch[7:] if is_origin else branch
+		base_style = "bold underline" if is_origin else "bold"
+
+		color = "head" if name == "HEAD" else "main" if name in ("main", "master") else "branch"
+		text.append(name, style=f"{base_style} {fade(color)}")
+
+	text.append(")", style=fade("paren"))
+	return text
+
+
+def format_datetime(commit, now, fade):
+	text = Text()
+	year, month, day = commit["date"]
+	month_str, day_str = commit["month_day"]
+	hour, minute = commit["time"]
+
+	if year < now.year:
+		text.append(f"{year}-{month_str}{day_str}", style=fade("time"))
+	else:
+		same_month = month == now.month
+		same_day = same_month and day == now.day
+
+		if same_day:
+			text.append(f"{month_str}{day_str}", style=fade("dim"))
+		elif same_month:
+			text.append(month_str, style=fade("dim"))
+			text.append(day_str, style=fade("date"))
+		else:
+			text.append(f"{month_str}{day_str}", style=fade("date"))
+
+		text.append("@", style=fade("at"))
+		text.append(f"{hour}{minute}", style=fade("time"))
+
+	return text
+
+
+def get_commits(n, console):
+	try:
+		log = check_output(
+			["git", "log", "-n", str(n), "--pretty=format:%h;%cd;%s;%d", "--date=format:%Y;%m;%d;%H;%M"],
+			stderr=subprocess.DEVNULL,
+		).decode()
+	except Exception:
+		console.print("gitl: not a git repository (or no commits yet)", style="red")
+		return []
+	return [parse_commit(line) for line in log.splitlines()] if log else []
+
+
+def assign_day_indices(commits):
+	current_day = None
+	day_idx = -1
+	for commit in commits:
+		if commit["date"] != current_day:
+			current_day = commit["date"]
+			day_idx += 1
+		commit["day_idx"] = day_idx
+
+
+def main():
+	console = Console()
+	now = datetime.now()
+	today = (now.year, now.month, now.day)
+
+	if len(sys.argv) > 1:
+		try:
+			commits = get_commits(int(sys.argv[1]), console)
+		except ValueError:
+			console.print("Usage: gitl [n_lines]", style="red")
+			sys.exit(1)
+	else:
+		commits = get_commits(100, console)
+		today_count = sum(1 for c in commits if c["date"] == today)
+		commits = commits[: max(DEFAULT_LINES, today_count)]
+
+	if not commits:
+		return
+
+	assign_day_indices(commits)
+
+	for commit in commits:
+		fade = make_fader(commit["day_idx"])
+		text = Text()
+
+		text.append(commit["hash"], style=f"bold {fade('hash')}")
+		text.append(" ")
+		text.append_text(format_datetime(commit, now, fade))
+		text.append(" ")
+		text.append(commit["msg"], style=fade("msg"))
+		text.append_text(format_branches(commit["branches"], fade))
+
+		console.print(text)
+
+
+if __name__ == "__main__":
+	main()

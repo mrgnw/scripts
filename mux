@@ -1,0 +1,6 @@
+#!/bin/zsh
+filename="$1:r"
+# SublerCLI -source "$1" -destination "$filename.m4v" -optimize
+# echo $filename
+ffmpeg -i "$1" -c:v copy -c:a aac "${filename}.mp4"
+# -vf "format=yuv420p" 

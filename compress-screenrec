@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Defaults tuned for screen recordings
+ENCODER="vt_h264"   # vt_h264, vt_h265, vt_h265_10bit
+QUALITY=20          # Lower = better quality (and larger file)
+FRAMERATE=""        # Empty -> same as source; e.g. 30 to force 30 fps
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [options]
+
+Compress video screen recordings in the CURRENT DIRECTORY using HandBrakeCLI + VideoToolbox.
+
+Behavior:
+- Processes only video files directly in the current directory (no subdirectories).
+- Writes compressed .mp4 files alongside the originals, named: basename.cps.mp4
+- After a successful encode, moves the original file to the macOS Trash using 'trash'.
+
+Options:
+  -e encoder   Video encoder (default: $ENCODER)
+               Examples: vt_h264, vt_h265, vt_h265_10bit, x264, x265
+  -q quality   Constant quality (float, lower = better). Default: $QUALITY
+  -r fps       Output frame rate (default: same as source)
+  -h           Show this help
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") -e vt_h265 -q 22
+EOF
+}
+
+while getopts "e:q:r:h" opt; do
+  case "$opt" in
+    e) ENCODER="$OPTARG" ;;
+    q) QUALITY="$OPTARG" ;;
+    r) FRAMERATE="$OPTARG" ;;
+    h) usage; exit 0 ;;
+    *) usage; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+# No positional arguments expected
+if [ "$#" -ne 0 ]; then
+  usage
+  exit 1
+fi
+
+INPUT_DIR="."
+OUTPUT_DIR="."
+
+EXTENSIONS=("mov" "mp4" "m4v" "mkv" "avi")
+
+process_file() {
+  local in="$1"
+  local rel
+  rel="$(basename "$in")"
+  local base="${rel%.*}"
+  # Add .cps before extension to avoid collisions with originals
+  local out="$OUTPUT_DIR/$base.cps.mp4"
+
+  if [ -f "$out" ]; then
+    echo "Output already exists, skipping: $out"
+    return
+  fi
+
+  echo "Processing:"
+  echo "  Input:  $in"
+  echo "  Output: $out"
+
+  # Build frame rate options
+  local rate_opts=()
+  if [ -n "$FRAMERATE" ]; then
+    rate_opts=(-r "$FRAMERATE" --cfr)
+  else
+    rate_opts=(--vfr)
+  fi
+
+  if HandBrakeCLI \
+      -i "$in" \
+      -o "$out" \
+      -e "$ENCODER" \
+      -q "$QUALITY" \
+      "${rate_opts[@]}" \
+      -E av_aac -B 128 -R 48 \
+      -f av_mp4 \
+      --enable-hw-decoding videotoolbox
+  then
+    echo "Encode succeeded, moving original to Trash: $in"
+    trash "$in"
+  else
+    echo "Encode FAILED for $in, leaving original in place." >&2
+    [ -f "$out" ] && rm -f "$out"
+  fi
+}
+
+have_files=false
+
+for ext in "${EXTENSIONS[@]}"; do
+  for file in "$INPUT_DIR"/*."$ext"; do
+    if [ ! -f "$file" ]; then
+      continue
+    fi
+    have_files=true
+    process_file "$file"
+  done
+done
+
+if [ "$have_files" = false ]; then
+  echo "No matching video files found in current directory."
+fi
+
+echo "Done."

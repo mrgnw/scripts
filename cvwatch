@@ -1,0 +1,24 @@
+#!/usr/bin/env zsh
+
+CV_DIR="$HOME/dev/sv/cv/static/cv"
+CV_EXPORT_DIR="$HOME/Documents/_dropzone"
+
+copy_updated_file() {
+	local filepath="$1"
+	[[ ! -f "$filepath" ]] && return
+	
+	local parent_dir_name="${filepath:h:t}"
+	local export_path="$CV_EXPORT_DIR/$parent_dir_name.pdf"     
+	mkdir -p "$CV_EXPORT_DIR"
+	chmod 755 "$CV_EXPORT_DIR"
+	
+	if [[ ! -f "$export_path" ]] || [[ $(wc -c < "$filepath") != $(wc -c < "$export_path") ]]; then
+		echo "${${filepath#$CV_DIR/}%/*} ▸ $export_path"
+		cp "$filepath" "$export_path"
+		chmod 644 "$export_path"
+	fi
+}
+
+/opt/homebrew/bin/fswatch -0 -e ".*" -i "\\.pdf$" --format "%p" "$CV_DIR" | while read -d "" event; do
+	copy_updated_file "$event"
+done

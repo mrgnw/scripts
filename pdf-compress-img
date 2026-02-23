@@ -1,0 +1,24 @@
+#!/bin/zsh
+
+input_pdf="$1"
+if [[ ! -f "$input_pdf" ]]; then
+  echo "Usage: $0 <pdf-file>"
+  exit 1
+fi
+
+pdf_name="${input_pdf:r}"
+output_dir=$(mktemp -d)
+
+# Extract all images
+pdfimages -all "$input_pdf" "$output_dir/page"
+
+# Optimize all extracted images (lossless)
+optimizt "$output_dir"/*
+
+# Recreate PDF
+img2pdf "$output_dir"/* -o "${pdf_name}-opt.pdf"
+
+# Cleanup temporary directory
+rm -rf "$output_dir"
+
+echo "Optimized PDF created: ${pdf_name}-opt.pdf"

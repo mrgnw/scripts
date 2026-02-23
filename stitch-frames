@@ -1,0 +1,166 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "pillow",
+#     "pillow-heif",
+#     "pillow-jxl-plugin",
+# ]
+# ///
+
+"""
+Stitches image frames into an HD 1080p video.
+Handles both portrait and landscape images by fitting them into 1920x1080 frames.
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+from PIL import Image
+import tempfile
+import shutil
+
+# Register HEIF and JXL plugins
+try:
+	from pillow_heif import register_heif_opener
+	register_heif_opener()
+except ImportError:
+	pass
+
+try:
+	import pillow_jxl
+except ImportError:
+	pass
+
+def analyze_images(image_dir: Path):
+	"""Analyze images to determine orientation mix."""
+	image_files = sorted([
+		f for f in image_dir.iterdir()
+		if f.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.heic', '.heif', '.jxl', '.avif'}
+	])
+	
+	if not image_files:
+		print(f"No image files found in {image_dir}")
+		sys.exit(1)
+	
+	orientations = {'portrait': 0, 'landscape': 0, 'square': 0}
+	
+	for img_path in image_files:
+		try:
+			with Image.open(img_path) as img:
+				width, height = img.size
+				if width > height:
+					orientations['landscape'] += 1
+				elif height > width:
+					orientations['portrait'] += 1
+				else:
+					orientations['square'] += 1
+		except Exception as e:
+			print(f"Warning: Could not read {img_path}: {e}")
+	
+	return image_files, orientations
+
+def process_images(image_files: list[Path], output_dir: Path, target_width: int = 1920, target_height: int = 1080):
+	"""Process images to fit into target resolution with letterboxing."""
+	output_dir.mkdir(parents=True, exist_ok=True)
+	
+	for idx, img_path in enumerate(image_files):
+		try:
+			with Image.open(img_path) as img:
+				# Convert to RGB if necessary
+				if img.mode != 'RGB':
+					img = img.convert('RGB')
+				
+				# Calculate scaling to fit within target dimensions
+				img_width, img_height = img.size
+				scale = min(target_width / img_width, target_height / img_height)
+				
+				new_width = int(img_width * scale)
+				new_height = int(img_height * scale)
+				
+				# Resize image
+				img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+				
+				# Create black background at target resolution
+				background = Image.new('RGB', (target_width, target_height), (0, 0, 0))
+				
+				# Calculate position to center the image
+				x_offset = (target_width - new_width) // 2
+				y_offset = (target_height - new_height) // 2
+				
+				# Paste resized image onto background
+				background.paste(img_resized, (x_offset, y_offset))
+				
+				# Save with sequential numbering for ffmpeg
+				output_path = output_dir / f"frame_{idx:06d}.jpg"
+				background.save(output_path, 'JPEG', quality=95)
+				
+		except Exception as e:
+			print(f"Error processing {img_path}: {e}")
+			sys.exit(1)
+	
+	return len(image_files)
+
+def create_video(frames_dir: Path, output_path: Path, fps: int = 30):
+	"""Use ffmpeg to create video from processed frames."""
+	cmd = [
+		'ffmpeg',
+		'-framerate', str(fps),
+		'-i', str(frames_dir / 'frame_%06d.jpg'),
+		'-c:v', 'libx264',
+		'-pix_fmt', 'yuv420p',
+		'-crf', '18',
+		'-y',
+		str(output_path)
+	]
+	
+	try:
+		subprocess.run(cmd, check=True)
+		print(f"\nVideo created: {output_path}")
+	except subprocess.CalledProcessError as e:
+		print(f"Error running ffmpeg: {e}")
+		sys.exit(1)
+	except FileNotFoundError:
+		print("Error: ffmpeg not found. Please install ffmpeg.")
+		sys.exit(1)
+
+def main():
+	parser = argparse.ArgumentParser(description='Stitch image frames into HD 1080p video')
+	parser.add_argument('directory', type=Path, help='Directory containing image frames')
+	parser.add_argument('-o', '--output', type=Path, help='Output video path (default: output.mp4)')
+	parser.add_argument('-f', '--fps', type=int, default=30, help='Frames per second (default: 30)')
+	parser.add_argument('--width', type=int, default=1920, help='Output width (default: 1920)')
+	parser.add_argument('--height', type=int, default=1080, help='Output height (default: 1080)')
+	
+	args = parser.parse_args()
+	
+	if not args.directory.is_dir():
+		print(f"Error: {args.directory} is not a directory")
+		sys.exit(1)
+	
+	output_path = args.output or Path('output.mp4')
+	
+	print(f"Analyzing images in {args.directory}...")
+	image_files, orientations = analyze_images(args.directory)
+	
+	print(f"\nFound {len(image_files)} images:")
+	print(f"  Landscape: {orientations['landscape']}")
+	print(f"  Portrait: {orientations['portrait']}")
+	print(f"  Square: {orientations['square']}")
+	print(f"\nTarget resolution: {args.width}x{args.height}")
+	print(f"Frame rate: {args.fps} fps\n")
+	
+	# Create temporary directory for processed frames
+	with tempfile.TemporaryDirectory() as temp_dir:
+		temp_path = Path(temp_dir)
+		
+		print("Processing images...")
+		frame_count = process_images(image_files, temp_path, args.width, args.height)
+		print(f"Processed {frame_count} frames")
+		
+		print("\nCreating video with ffmpeg...")
+		create_video(temp_path, output_path, args.fps)
+
+if __name__ == '__main__':
+	main()

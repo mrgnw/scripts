@@ -1,0 +1,4 @@
+#!/usr/bin/env zsh
+
+log_path=${2:-"$HOME/.log/$1.log"}
+/usr/bin/log stream --level debug -p "$1" > "$log_path"

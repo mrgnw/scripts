@@ -1,0 +1,4 @@
+#!/bin/zsh
+filename="$1:r"
+ffmpeg -i "$1" -c:a aac "${filename}.mp4"
+# -vf "format=yuv420p" 

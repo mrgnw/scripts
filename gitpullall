@@ -1,0 +1,11 @@
+#!/bin/zsh
+
+find . -mindepth 1 -maxdepth 1 -type d -exec test -d "{}/.git" \; -print | parallel -j 0 '
+  branch=$(git -C {} rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [[ "$branch" == "develop" ]]; then
+    echo "Pulling in {} (branch: $branch)"
+    git -C {} pull
+  else
+    echo "Skipping {} (branch: $branch)"
+  fi
+'

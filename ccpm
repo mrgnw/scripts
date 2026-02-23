@@ -1,0 +1,88 @@
+#!/bin/bash
+
+SOURCE_DIR="$HOME/dev/src/ccpm/ccpm"
+CLAUDE_DIR=".claude"
+
+function show_help {
+	echo "Usage: ccpm [init|update|help]"
+	echo ""
+	echo "  init    - Install CCPM into the current project"
+	echo "  update  - Refresh symlinks (e.g. after source adds new files)"
+	echo "  help    - Show this message"
+}
+
+function ensure_symlink {
+	local link_path="$1"
+	local target="$2"
+
+	if [ -L "$link_path" ]; then
+		rm "$link_path"
+	elif [ -e "$link_path" ]; then
+		echo "  Skipping $link_path (already exists)"
+		return
+	fi
+	ln -s "$target" "$link_path"
+}
+
+function init_project {
+	if [ ! -d "$SOURCE_DIR" ]; then
+		echo "Error: Source not found at $SOURCE_DIR"
+		exit 1
+	fi
+
+	echo "Installing CCPM..."
+
+	# Symlink ccpm/ at project root (commands reference "ccpm/scripts/pm/...")
+	ensure_symlink "ccpm" "$SOURCE_DIR"
+	echo "  Linked ccpm/ -> $SOURCE_DIR"
+
+	# Create .claude/ and data directories
+	mkdir -p "$CLAUDE_DIR/commands"
+	mkdir -p "$CLAUDE_DIR/context"
+	mkdir -p "$CLAUDE_DIR/epics"
+	mkdir -p "$CLAUDE_DIR/prds"
+
+	# Symlink command subdirectories (pm, context, testing)
+	for dir in ccpm/commands/*/; do
+		local name
+		name=$(basename "$dir")
+		ensure_symlink "$CLAUDE_DIR/commands/$name" "../../ccpm/commands/$name"
+	done
+
+	# Symlink individual command files (prompt.md, re-init.md, etc.)
+	for file in ccpm/commands/*.md; do
+		local name
+		name=$(basename "$file")
+		ensure_symlink "$CLAUDE_DIR/commands/$name" "../../ccpm/commands/$name"
+	done
+	echo "  Linked commands into $CLAUDE_DIR/commands/"
+
+	# Symlink agents, rules, hooks
+	for dir in agents rules hooks; do
+		if [ -d "ccpm/$dir" ]; then
+			ensure_symlink "$CLAUDE_DIR/$dir" "../ccpm/$dir"
+			echo "  Linked $dir/"
+		fi
+	done
+
+	# Add ccpm to .gitignore
+	if ! grep -q "^ccpm$" .gitignore 2>/dev/null; then
+		echo "ccpm" >> .gitignore
+		echo "  Added ccpm to .gitignore"
+	fi
+
+	echo ""
+	echo "Done. Run /pm:init inside Claude Code to finish setup."
+}
+
+case "$1" in
+	init)
+		init_project
+		;;
+	update)
+		init_project
+		;;
+	*)
+		show_help
+		;;
+esac

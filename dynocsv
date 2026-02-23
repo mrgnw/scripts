@@ -1,0 +1,192 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "boto3",
+#     "duckdb"
+# ]
+# ///
+
+import sys
+import boto3
+import duckdb
+from typing import Dict, Any, List
+import argparse
+
+
+def scan_dynamodb_table(table_name: str, region: str = None) -> List[Dict[str, Any]]:
+	"""
+	Scan entire DynamoDB table and return all items.
+	"""
+	# Create DynamoDB client
+	if region:
+		dynamodb = boto3.client("dynamodb", region_name=region)
+	else:
+		dynamodb = boto3.client("dynamodb")
+
+	print(f"Scanning DynamoDB table: {table_name}")
+
+	items = []
+	response = dynamodb.scan(TableName=table_name)
+	items.extend(response.get("Items", []))
+
+	# Handle pagination
+	while "LastEvaluatedKey" in response:
+		print(f"Retrieved {len(items)} items so far...")
+		response = dynamodb.scan(TableName=table_name, ExclusiveStartKey=response["LastEvaluatedKey"])
+		items.extend(response.get("Items", []))
+
+	print(f"Total items retrieved: {len(items)}")
+	return items
+
+
+def convert_dynamodb_to_dict(dynamodb_item: Dict[str, Any]) -> Dict[str, Any]:
+	"""
+	Convert DynamoDB item format to regular dictionary using modern Python patterns.
+
+	DynamoDB format: {'attr': {'S': 'value'}} or {'attr': {'N': '123'}}
+	Regular format: {'attr': 'value'} or {'attr': 123}
+	"""
+
+	def convert_value(value: Any) -> Any:
+		"""Convert a single DynamoDB value to Python native type."""
+		if not isinstance(value, dict) or len(value) != 1:
+			return value
+
+		type_key, actual_value = next(iter(value.items()))
+
+		match type_key:
+			case "S":  # String
+				return actual_value
+			case "N":  # Number
+				return int(actual_value) if "." not in actual_value else float(actual_value)
+			case "B":  # Binary
+				return str(actual_value)
+			case "BOOL":  # Boolean
+				return actual_value
+			case "NULL":  # Null
+				return None
+			case "L":  # List
+				return [convert_value(item) for item in actual_value]
+			case "M":  # Map
+				return {k: convert_value(v) for k, v in actual_value.items()}
+			case "SS" | "NS" | "BS":  # Sets (String Set, Number Set, Binary Set)
+				if type_key == "NS":
+					return [float(n) for n in actual_value]
+				elif type_key == "BS":
+					return [str(b) for b in actual_value]
+				else:
+					return actual_value
+			case _:  # Unknown type
+				return actual_value
+
+	return {key: convert_value(value) for key, value in dynamodb_item.items()}
+
+
+def save_to_csv_with_duckdb(items: List[Dict[str, Any]], output_file: str):
+	"""
+	Use DuckDB to process data and save to CSV with modern Python patterns.
+	"""
+	if not items:
+		print("No items to save.")
+		return
+
+	# Convert DynamoDB items to regular dictionaries
+	converted_items = [convert_dynamodb_to_dict(item) for item in items]
+
+	# Create DuckDB connection
+	conn = duckdb.connect()
+
+	print(f"Processing {len(converted_items)} items...")
+
+	try:
+		# Get all unique keys and create schema
+		all_keys = sorted(set().union(*(item.keys() for item in converted_items)))
+
+		# Create table with proper column names (escaped)
+		columns_def = ", ".join(f'"{key}" VARCHAR' for key in all_keys)
+		conn.execute(f"CREATE TABLE dynamodb_data ({columns_def})")
+
+		# Prepare data for batch insert
+		rows = []
+		for item in converted_items:
+			row = []
+			for key in all_keys:
+				value = item.get(key)
+				# Convert complex types to JSON strings for CSV compatibility
+				if isinstance(value, (list, dict)):
+					import json
+
+					row.append(json.dumps(value, default=str))
+				else:
+					row.append(value)
+			rows.append(row)
+
+		# Batch insert all data
+		placeholders = ", ".join("?" for _ in all_keys)
+		conn.executemany(f"INSERT INTO dynamodb_data VALUES ({placeholders})", rows)
+
+		# Export to CSV
+		conn.execute(f"COPY dynamodb_data TO '{output_file}' (FORMAT CSV, HEADER)")
+
+		# Show results
+		row_count = conn.execute("SELECT COUNT(*) FROM dynamodb_data").fetchone()[0]
+		print(f"Columns: {all_keys}")
+		print(f"Data exported to: {output_file} ({row_count} rows)")
+
+		# Show sample data
+		print("\nSample data (first 3 rows):")
+		sample_rows = conn.execute("SELECT * FROM dynamodb_data LIMIT 3").fetchall()
+
+		for i, row in enumerate(sample_rows, 1):
+			print(f"Row {i}: {dict(zip(all_keys, row))}")
+
+	finally:
+		conn.close()
+
+
+def main():
+	parser = argparse.ArgumentParser(
+		description="Download DynamoDB table to CSV using DuckDB",
+		formatter_class=argparse.RawDescriptionHelpFormatter,
+		epilog="""
+Examples:
+  %(prog)s my-table
+  %(prog)s my-table --output my-data.csv
+  %(prog)s my-table --region us-west-2
+  %(prog)s my-table --output data.csv --region eu-west-1
+		""",
+	)
+
+	parser.add_argument("table_name", help="DynamoDB table name")
+	parser.add_argument(
+		"--output",
+		"-o",
+		help="Output CSV file (default: <table_name>.csv)",
+	)
+	parser.add_argument("--region", "-r", help="AWS region (uses default region if not specified)")
+
+	args = parser.parse_args()
+
+	# Set default output filename based on table name if not provided
+	if not args.output:
+		args.output = f"{args.table_name}.csv"
+
+	try:
+		# Scan DynamoDB table
+		items = scan_dynamodb_table(args.table_name, args.region)
+
+		if not items:
+			print("No items found in the table.")
+			return
+
+		# Save to CSV using DuckDB
+		save_to_csv_with_duckdb(items, args.output)
+
+	except Exception as e:
+		print(f"Error: {e}")
+		sys.exit(1)
+
+
+if __name__ == "__main__":
+	main()

@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# jxlmeta - Extract metadata from JXL files (separate files for each type)
+
+if [ $# -eq 0 ]; then
+    echo "Usage: jxlmeta <file_or_directory> [<file_or_directory> ...]"
+    exit 1
+fi
+
+EXIFTOOL_OUTPUT="jxl_metadata_exiftool.json"
+MDLS_OUTPUT="jxl_metadata_mdls.json"
+
+# Create temporary directory
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf $TEMP_DIR" EXIT
+
+# Collect all files to process
+ALL_FILES=()
+
+for arg in "$@"; do
+    if [ -f "$arg" ]; then
+        ALL_FILES+=("$arg")
+    elif [ -d "$arg" ]; then
+        while IFS= read -r file; do
+            ALL_FILES+=("$file")
+        done < <(find "$arg" -name "*.jxl" -type f)
+    else
+        echo "Warning: '$arg' is neither a file nor a directory, skipping..."
+    fi
+done
+
+if [ ${#ALL_FILES[@]} -eq 0 ]; then
+    echo "Error: No JXL files found"
+    exit 1
+fi
+
+echo "Processing ${#ALL_FILES[@]} file(s)..."
+echo ""
+
+# Extract exiftool metadata (all files at once)
+echo "Extracting exiftool metadata..."
+exiftool -json "${ALL_FILES[@]}" > "$EXIFTOOL_OUTPUT"
+
+# Extract mdls metadata
+echo "Extracting mdls metadata..."
+echo "[" > "$MDLS_OUTPUT"
+
+count=0
+for file in "${ALL_FILES[@]}"; do
+    # Get mdls output as plist and convert to JSON
+    if mdls -plist - "$file" > "$TEMP_DIR/temp.plist" 2>/dev/null; then
+        if plutil -convert json -o "$TEMP_DIR/temp.json" "$TEMP_DIR/temp.plist" 2>/dev/null; then
+
+            # Add comma between entries
+            if [ $count -gt 0 ]; then
+                echo "," >> "$MDLS_OUTPUT"
+            fi
+
+            # Add SourceFile and append
+            jq --arg filepath "$file" '. + {SourceFile: $filepath}' "$TEMP_DIR/temp.json" >> "$MDLS_OUTPUT"
+            ((count++))
+        fi
+    fi
+done
+
+echo "]" >> "$MDLS_OUTPUT"
+
+echo ""
+echo "✓ exiftool metadata saved to: $EXIFTOOL_OUTPUT"
+echo "✓ mdls metadata saved to: $MDLS_OUTPUT (from $count files)"

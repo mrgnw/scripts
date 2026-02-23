@@ -1,0 +1,402 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "pillow",
+#     "pillow-heif",
+#     "pymupdf",
+#     "tqdm",
+#     "Send2Trash",
+# ]
+# ///
+"""
+Extract images from PDFs using PyMuPDF (no external poppler dependency), convert to HEIC by default, and optimize outputs.
+
+Usage: pdfimgs [directory]
+    - If directory is not specified, uses current working directory
+    - Phase 1: For each PDF found:
+      - If PDF has 1 image: saves it directly as {pdf_name}.{format}
+      - If PDF has multiple images: saves them in {pdf_name}/ subdirectory
+    - Phase 2: Optimize all extracted images using optimizt (external CLI, optional)
+"""
+
+import sys
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Optional
+
+import fitz  # PyMuPDF
+from PIL import Image
+import pillow_heif
+from tqdm import tqdm
+from send2trash import send2trash
+# Route all prints through tqdm.write to avoid breaking progress bars
+import builtins
+
+def _tqdm_print(*args, sep=" ", end="\n", file=None, flush=False):
+    s = sep.join(str(a) for a in args)
+    tqdm.write(s, file=file or sys.stdout, end=end)
+    if flush:
+        try:
+            (file or sys.stdout).flush()
+        except Exception:
+            pass
+
+builtins.print = _tqdm_print
+
+# Register HEIF handler with Pillow
+pillow_heif.register_heif_opener()
+
+def convert_to_heic(image_path: Path, quality: int = 60, overwrite: bool = True, conversion_bar: Optional[tqdm] = None) -> Optional[Path]:
+    """
+    Convert a single image file to HEIC using Pillow + pillow_heif.
+    Returns the output .heic path on success, or None on failure.
+
+    - quality: 0..100 (higher = larger file, better visual quality)
+    - overwrite: if True, remove the original file after successful conversion
+    """
+    try:
+        with Image.open(image_path) as im:
+            if im.mode in ("P", "1"):
+                im = im.convert("RGBA")
+            # Compute final HEIC name:
+            # If this is a temp file like ".__tmp__{pdf_stem}__img-1-1.png", strip the temp prefix
+            name = image_path.name
+            # Our temp pattern is something like ".__tmp__{pdf_stem}__img-1-1.png"
+            # To get the final base name, take the segment after the last "__"
+            base = name.split("__")[-1] if "__" in name else name
+            final_name = Path(base).with_suffix(".heic").name
+            out_path = image_path.parent / final_name
+            im.save(out_path, format="HEIF", quality=quality)
+            if conversion_bar is not None:
+                conversion_bar.update(1)
+    except Exception as e:
+        print(f"Error converting {image_path.name} to HEIC: {e}")
+        return None
+
+    if overwrite:
+        try:
+            image_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    return out_path
+
+
+def extract_images_from_pdf(
+    pdf_path: Path,
+    output_dir: Path,
+    heic_enabled: bool = False,
+    heic_quality: int = 60,
+    heic_overwrite: bool = True,
+    convert_executor: Optional[ThreadPoolExecutor] = None,
+    conversion_futures: Optional[list] = None,
+    image_extract_bar: Optional[tqdm] = None,
+    conversion_bar: Optional[tqdm] = None,
+) -> Path | None:
+    """
+    Extract images from a PDF using PyMuPDF.
+
+    Returns the path to the extracted content (file or folder) or None if no images found or on error.
+    """
+    if not pdf_path.exists():
+        print(f"Error: file not found: {pdf_path}")
+        return None
+
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        print(f"Error opening {pdf_path.name}: {e}")
+        return None
+
+    extracted_files: list[Path] = []
+
+    try:
+        for page_index in range(len(doc)):
+            page = doc[page_index]
+            # full=True includes images used in transparency/softmasks; default False is fine, but we'll keep full for parity
+            for img in page.get_images(full=True):
+                xref = img[0]
+                try:
+                    img_info = doc.extract_image(xref)
+                except Exception as e:
+                    print(f"Error extracting image xref {xref} from page {page_index+1} in {pdf_path.name}: {e}")
+                    continue
+
+                image_bytes: Optional[bytes] = img_info.get("image")
+                ext: str = img_info.get("ext", "png")  # default to png if extension is missing
+                if not image_bytes:
+                    # Sometimes PyMuPDF may return None if image can't be extracted
+                    print(f"Warning: no bytes for image xref {xref} in {pdf_path.name}")
+                    continue
+
+                # Build a deterministic name similar to pdfimages: img-{pageindex}-{seq}.{ext}
+                # We use the count of images extracted so far to create a simple sequence.
+                seq = len(extracted_files) + 1
+                name = f"img-{page_index+1}-{seq}.{ext}"
+
+                # Write into output; if HEIC is enabled, stream into a per-PDF subdirectory and submit conversion
+                if heic_enabled:
+                    subdir = output_dir / pdf_path.stem
+                    subdir.mkdir(exist_ok=True)
+                    temp_path = subdir / f".__tmp__{pdf_path.stem}__{name}"
+                else:
+                    temp_path = output_dir / f".__tmp__{pdf_path.stem}__{name}"
+                try:
+                    temp_path.write_bytes(image_bytes)
+                    extracted_files.append(temp_path)
+                    if image_extract_bar is not None:
+                        image_extract_bar.update(1)
+                    # Stream conversion immediately if enabled
+                    if heic_enabled and convert_executor is not None:
+                        if conversion_bar is not None:
+                            conversion_bar.total += 1
+                            conversion_bar.refresh()
+                        fut = convert_executor.submit(
+                            convert_to_heic,
+                            temp_path,
+                            quality=heic_quality,
+                            overwrite=heic_overwrite,
+                            conversion_bar=conversion_bar,
+                        )
+                        if conversion_futures is not None:
+                            conversion_futures.append(fut)
+                except Exception as e:
+                    print(f"Error writing image {name} from {pdf_path.name}: {e}")
+                    continue
+    finally:
+        doc.close()
+
+    # No images found
+    if not extracted_files:
+        print(f"No images found in {pdf_path.name}")
+        return None
+
+    # Determine output location based on number of images
+    pdf_name_no_ext = pdf_path.stem
+
+    # If HEIC is enabled, we already wrote into a per-PDF subdirectory and streamed conversions
+    if heic_enabled:
+        subdir = output_dir / pdf_name_no_ext
+        # Do not rename or delete temp files here; conversion tasks read them and write final HEICs.
+        return subdir
+
+    # HEIC disabled: keep original single/multi behavior
+    if len(extracted_files) == 1:
+        # Single image: save directly with PDF name preserving image extension
+        image_path = extracted_files[0]
+        ext = image_path.suffix
+        output_path = output_dir / f"{pdf_name_no_ext}{ext}"
+        try:
+            image_path.replace(output_path)
+        except Exception:
+            # Fallback to copy then remove temp
+            data = image_path.read_bytes()
+            output_path.write_bytes(data)
+            try:
+                image_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        # log suppressed to keep tqdm clean
+        return output_path
+    else:
+        # Multiple images: create subdirectory
+        subdir = output_dir / pdf_name_no_ext
+        subdir.mkdir(exist_ok=True)
+        for image_path in extracted_files:
+            output_path = subdir / image_path.name.replace(f".__tmp__{pdf_name_no_ext}__", "")
+            try:
+                image_path.replace(output_path)
+            except Exception:
+                data = image_path.read_bytes()
+                output_path.write_bytes(data)
+                try:
+                    image_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        return subdir
+
+
+def optimize_images(path: Path) -> None:
+    """
+    Optimize images using optimizt (external CLI).
+
+    If path is a directory, optimizes all contents recursively.
+    If path is a file, optimizes the file.
+
+    Note: This step depends on 'optimizt' being installed in your environment (e.g., via npm).
+    If not available, this step will be skipped with a message.
+    """
+    try:
+        subprocess.run(
+            ["optimizt", str(path)],
+            check=True,
+            capture_output=True,
+        )
+        if path.is_dir():
+            print(f"Optimized images in {path.name}/")
+        else:
+            print(f"Optimized {path.name}")
+    except FileNotFoundError:
+        print("Info: 'optimizt' not found. Skipping optimization step. Install it if you want optimization.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error optimizing {path.name}: {e.stderr.decode()}")
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Extract images from PDFs and convert to HEIC by default, then optimize.")
+    parser.add_argument("directory", nargs="?", help="Directory to search for PDFs (default: cwd)")
+    parser.add_argument("--no-heic", action="store_true", help="Disable HEIC conversion (enabled by default)")
+    parser.add_argument("--heic-quality", type=int, default=60, help="HEIC quality (0..100, default: 60)")
+    parser.add_argument("--keep-originals", action="store_true", help="Keep original extracted raster images alongside HEIC outputs (default is to replace originals)")
+    parser.add_argument("--optimize-originals", action="store_true", help="When HEIC is enabled and originals are kept, also optimize the original non-HEIC images")
+    parser.add_argument("--keep-pdfs", action="store_true", help="Keep source PDFs; default is to move them to Trash after processing")
+    args = parser.parse_args()
+
+    # Determine directory to search
+    search_dir = Path(args.directory) if args.directory else Path.cwd()
+
+    if not search_dir.is_dir():
+        print(f"Error: {search_dir} is not a valid directory")
+        sys.exit(1)
+
+    # Find all PDFs in the directory (non-recursive)
+    pdf_files = sorted(search_dir.glob("*.pdf"))
+
+    if not pdf_files:
+        print(f"No PDF files found in {search_dir}")
+        return
+
+    print(f"Found {len(pdf_files)} PDF file(s) in {search_dir}")
+    print()
+
+    # Phase 1: Extract images from PDFs in parallel
+    print("Phase 1: Extracting images...")
+    output_paths = []
+    conversion_futures: list = []
+    if not args.no_heic:
+        convert_executor_ctx = ThreadPoolExecutor(max_workers=None)
+    else:
+        convert_executor_ctx = None
+    try:
+        conversion_bar = tqdm(total=0, desc="Converting to HEIC", unit="img") if not args.no_heic else None
+        with ThreadPoolExecutor(max_workers=None) as executor, tqdm(total=0, desc="Extracting images", unit="img") as image_extract_bar:
+            futures = []
+            future_to_pdf = {}
+            for pdf_path in pdf_files:
+                f = executor.submit(
+                    extract_images_from_pdf,
+                    pdf_path,
+                    search_dir,
+                    heic_enabled=not args.no_heic,
+                    heic_quality=args.heic_quality,
+                    heic_overwrite=not args.keep_originals,
+                    convert_executor=convert_executor_ctx,
+                    conversion_futures=conversion_futures,
+                    image_extract_bar=image_extract_bar,
+                    conversion_bar=conversion_bar,
+                )
+                futures.append(f)
+                future_to_pdf[f] = pdf_path
+            with tqdm(total=len(futures), desc="Extracting", unit="pdf") as pbar:
+                for future in as_completed(futures):
+                    path = future.result()
+                    _ = future_to_pdf.get(future)
+                    if path is not None:
+                        output_paths.append(path)
+                    pbar.update(1)
+    finally:
+        if convert_executor_ctx is not None:
+            # Do not shut down yet; conversions may still be running
+            pass
+
+    if not output_paths:
+        print("No images were extracted.")
+        return
+
+    # Phase 2: HEIC conversion (enabled by default unless --no-heic)
+    if not args.no_heic:
+        heic_outputs: list[Path] = []
+        for future in as_completed(conversion_futures):
+            out = future.result()
+            if out:
+                heic_outputs.append(out)
+        if conversion_bar is not None:
+            conversion_bar.close()
+
+        # If we overwrote originals (deleted them), keep HEIC outputs as the new set.
+        # If not overwriting, optimize only HEICs by default unless --optimize-originals is set.
+        if not args.keep_originals:
+            output_paths = heic_outputs
+        else:
+            if args.optimize_originals:
+                output_paths.extend(heic_outputs)
+            else:
+                output_paths = heic_outputs
+
+    # Phase 3: Optimize all extracted images in parallel (optional external tool)
+    # Cleanup leftover temp files from extraction
+    for p in output_paths:
+        if p.is_dir():
+            for f in p.iterdir():
+                if f.is_file() and f.name.startswith(".__tmp__"):
+                    try:
+                        f.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        else:
+            if p.name.startswith(".__tmp__"):
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+    # Denest single-image directories by grouping converted files by parent
+    by_parent: dict[Path, list[Path]] = {}
+    for f in output_paths:
+        by_parent.setdefault(f.parent, []).append(f)
+
+    denested: list[Path] = []
+    for parent, files in by_parent.items():
+        if len(files) == 1:
+            sole = files[0]
+            dest = parent.parent / f"{parent.name}{sole.suffix}"
+            try:
+                sole.replace(dest)
+            except Exception:
+                dest.write_bytes(sole.read_bytes())
+                try:
+                    sole.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            try:
+                parent.rmdir()
+            except Exception:
+                pass
+            denested.append(dest)
+        else:
+            denested.extend(files)
+    output_paths = denested
+
+    print()
+    # Phase 3: Optimizing images...
+    print("Phase 3: Optimizing images...")
+    with ThreadPoolExecutor(max_workers=None) as executor:
+        futures = [executor.submit(optimize_images, path) for path in output_paths]
+        for future in futures:
+            future.result()
+
+    if not args.keep_pdfs:
+        for pdf in pdf_files:
+            try:
+                send2trash(str(pdf))
+            except Exception as e:
+                print(f"Warning: failed to move to Trash: {pdf.name}: {e}")
+    print()
+    print("Done!")
+
+
+if __name__ == "__main__":
+    main()

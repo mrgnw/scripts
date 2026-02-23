@@ -1,0 +1,122 @@
+#! /usr/bin/env python3
+
+import subprocess
+from pathlib import Path
+import sys
+import asyncio
+
+
+def cleanup():
+	Path('merge_files.txt').unlink(missing_ok=True)
+	Path('metadata.txt').unlink(missing_ok=True)
+
+
+async def media_duration(filename):
+	result = subprocess.run(
+		[
+			'ffprobe',
+			'-v',
+			'error',
+			'-show_entries',
+			'format=duration',
+			'-of',
+			'default=noprint_wrappers=1:nokey=1',
+			filename,
+		],
+		stdout=subprocess.PIPE,
+		stderr=subprocess.STDOUT,
+	)
+
+	return round(float(result.stdout), 3)
+
+
+async def ffmpeg_cmd(cmd_str):
+	process = await asyncio.create_subprocess_shell(cmd_str, stdout=sys.stdout, stderr=sys.stderr)
+	await process.wait()
+	return process
+
+
+async def merge_files(files):
+	"""Merge all files to $(pwd)_merged.m4b"""
+	Path('merge_files.txt').unlink(missing_ok=True)
+
+	with open('merge_files.txt', 'w') as f:
+		for file in files:
+			f.write(f"file '{file}'\n")
+	parent_dir = files[0].absolute().parent
+	output_file = parent_dir / f'{parent_dir.name}_merged.m4b'
+	output_file.unlink(missing_ok=True)
+
+	cmd = f'ffmpeg -f concat -safe 0 -i merge_files.txt -c:a aac -b:a 64k "{output_file}"'
+	await ffmpeg_cmd(cmd)
+
+	return output_file
+
+
+def chapter_str(start_ms, end_ms='', title=''):
+	output_str = '[CHAPTER]\nTIMEBASE=1/1000\n'
+	output_str += f'START={start_ms}\nEND={end_ms}\n'
+	output_str += f'title={title}\n'
+	return output_str
+
+
+async def get_chapters_from(files):
+	start_time = 0
+	chapters = []
+	for media_file in files:
+		dur = await media_duration(media_file)
+		dur = int(dur * 1000)
+		print(f'{start_time}:\t{dur}\t{start_time + dur}')
+		chapters.append(start_time)
+		start_time += dur
+	return chapters
+
+
+async def write_metadata(merged_file_path, chapters):
+	media_file = Path(f'{merged_file_path.stem}_chapters.m4b')
+
+	metadata_file = Path('metadata.txt')
+	metadata_file.unlink(missing_ok=True)
+
+	with open(metadata_file, 'w') as f:
+		f.write(';FFMETADATA1\n')
+		for i, chapter in enumerate(chapters):
+			end = chapters[i + 1] if i + 1 < len(chapters) else ''
+			f.write(chapter_str(chapter, end, i))
+
+	chapters.pop()
+
+	cmd = f'ffmpeg -i "{merged_file_path}" -i metadata.txt -map_metadata 1 -codec copy "{media_file}"'
+	await ffmpeg_cmd(cmd)
+	return media_file
+
+
+async def main():
+	files = sorted(
+		[
+			file
+			for ext in ['*.mp3', '*.m4b']
+			for file in Path().glob(ext)
+			if '_merged' not in file.name and '_chapters' not in file.name
+		]
+	)
+	if len(files) < 2:
+		print(f'Not enough files: {files}')
+		return
+	parent_dir = files[0].absolute().parent
+	merged_path = parent_dir / f'{parent_dir.name}_merged.m4b'
+
+	chapters = await get_chapters_from(files)
+
+	if merged_path.exists():
+		merged_file = merged_path
+		print('merged_file exists, skipping merge_files')
+	else:
+		merged_file = await merge_files(files)
+	media_file = await write_metadata(merged_file, chapters)
+	print(f'{round(media_file.stat().st_size / 1024 / 1024, 1)} MB\t{media_file}')
+	cleanup()
+
+
+if __name__ == '__main__':
+	asyncio.run(main())
