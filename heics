@@ -1,22 +1,49 @@
 #!/usr/bin/env zsh
-
-mkdir -p original
+set -euo pipefail
 setopt localoptions nocaseglob
 
 extensions=(${(f)"$(globs images -x heic heif)"})
+files=()
+for ext in "${extensions[@]}"; do
+	files+=(${~ext}(N))
+done
+if [[ ${#files[@]} -eq 0 ]]; then
+	echo "No image files found." >&2
+	exit 1
+fi
 
-find . -maxdepth 1 -type f \( \
-    $(printf -- "-iname %s -o " "${extensions[@]}") \
-    -false \) -print0 | \
-    parallel -0 -j "$(sysctl -n hw.ncpu)" '
-        original_file={}
-        heic_file="${original_file%.*}.heic"
-        heic "$original_file"
+orig_size=0
+for f in "${files[@]}"; do
+	orig_size=$(( orig_size + $(stat -f%z "$f") ))
+done
 
-        # Preserve the original file dates on the new HEIC file
-        if [[ -f "$heic_file" ]]; then
-            touch -r "$original_file" "$heic_file"
-        fi
+mkdir -p original
+printf '%s\0' "${files[@]}" | parallel -0 '
+	heic_file="{.}.heic"
+	heic {}
+	if [[ -f "$heic_file" ]]; then
+		touch -r {} "$heic_file"
+	fi
+	mv {} original/
+'
 
-        mv "$original_file" original/
-    '
+heic_size=0
+converted=0
+for f in "${files[@]}"; do
+	heic="${f%.*}.heic"
+	if [[ -f "$heic" ]]; then
+		heic_size=$(( heic_size + $(stat -f%z "$heic") ))
+		(( converted++ ))
+	fi
+done
+saved=$(( orig_size - heic_size ))
+if (( orig_size > 0 )); then
+	pct=$(( saved * 100 / orig_size ))
+	if (( orig_size > 1048576 )); then
+		printf '%d files: %.1fMB → %.1fMB (saved %.1fMB, %d%%)\n' \
+			$converted $(( orig_size / 1048576.0 )) $(( heic_size / 1048576.0 )) $(( saved / 1048576.0 )) $pct
+	else
+		printf '%d files: %dKB → %dKB (saved %dKB, %d%%)\n' \
+			$converted $(( orig_size / 1024 )) $(( heic_size / 1024 )) $(( saved / 1024 )) $pct
+	fi
+fi
