@@ -26,7 +26,33 @@ if [[ ${#files[@]} -eq 0 ]]; then
 	exit 1
 fi
 
+orig_size=0
+for f in "${files[@]}"; do
+	orig_size=$(( orig_size + $(stat -f%z "$f") ))
+done
+
 printf '%s\0' "${files[@]}" | parallel -0 'avifenc -j 1 --speed 6 {} {.}.avif'
+
+avif_size=0
+converted=0
+for f in "${files[@]}"; do
+	avif="${f%.*}.avif"
+	if [[ -f "$avif" ]]; then
+		avif_size=$(( avif_size + $(stat -f%z "$avif") ))
+		(( converted++ ))
+	fi
+done
+saved=$(( orig_size - avif_size ))
+if (( orig_size > 0 )); then
+	pct=$(( saved * 100 / orig_size ))
+	if (( orig_size > 1048576 )); then
+		printf '%d files: %.1fMB → %.1fMB (saved %.1fMB, %d%%)\n' \
+			$converted $(( orig_size / 1048576.0 )) $(( avif_size / 1048576.0 )) $(( saved / 1048576.0 )) $pct
+	else
+		printf '%d files: %dKB → %dKB (saved %dKB, %d%%)\n' \
+			$converted $(( orig_size / 1024 )) $(( avif_size / 1024 )) $(( saved / 1024 )) $pct
+	fi
+fi
 
 if $trash; then
 	for f in "${files[@]}"; do
