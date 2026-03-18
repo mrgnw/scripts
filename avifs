@@ -1,0 +1,40 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+setopt nocaseglob
+
+trash=false
+positional=()
+for arg in "$@"; do
+	case $arg in
+		-t|--trash) trash=true ;;
+		*) positional+=("$arg") ;;
+	esac
+done
+
+if [[ ${#positional[@]} -gt 0 ]]; then
+	files=("${positional[@]}")
+else
+	extensions=(${(f)"$(globs images -x avif)"})
+	files=()
+	for ext in "${extensions[@]}"; do
+		files+=(${~ext}(N))
+	done
+fi
+if [[ ${#files[@]} -eq 0 ]]; then
+	echo "No image files found." >&2
+	echo "Usage: avifs [-t|--trash] [file ...]" >&2
+	exit 1
+fi
+
+printf '%s\0' "${files[@]}" | parallel -0 'avifenc -j 1 --speed 6 {} {.}.avif'
+
+if $trash; then
+	for f in "${files[@]}"; do
+		base="${f%.*}"
+		if [[ -f "${base}.avif" ]]; then
+			mv "$f" ~/.Trash/
+		else
+			echo "Skipping trash for $f (no .avif output found)" >&2
+		fi
+	done
+fi
