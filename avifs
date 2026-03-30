@@ -1,4 +1,5 @@
 #!/usr/bin/env zsh
+# brew install libavif
 set -euo pipefail
 setopt nocaseglob
 
@@ -31,7 +32,27 @@ for f in "${files[@]}"; do
 	orig_size=$(( orig_size + $(stat -f%z "$f") ))
 done
 
-printf '%s\0' "${files[@]}" | parallel -0 'avifenc -j 1 --speed 6 {} {.}.avif'
+raw_exts=(${(f)"$(globs raw)"})
+raw_exts=(${raw_exts/\*./})
+
+raw_files=()
+normal_files=()
+for f in "${files[@]}"; do
+	ext="${f##*.}"
+	if (( ${raw_exts[(Ie)${ext:l}]} )); then
+		raw_files+=("$f")
+	else
+		normal_files+=("$f")
+	fi
+done
+
+if [[ ${#raw_files[@]} -gt 0 ]]; then
+	img2avif --quality 60 --speed 6 "${raw_files[@]}"
+fi
+
+if [[ ${#normal_files[@]} -gt 0 ]]; then
+	printf '%s\0' "${normal_files[@]}" | parallel -0 'avifenc -j 1 --speed 6 {} {.}.avif'
+fi
 
 avif_size=0
 converted=0
@@ -39,7 +60,7 @@ for f in "${files[@]}"; do
 	avif="${f%.*}.avif"
 	if [[ -f "$avif" ]]; then
 		avif_size=$(( avif_size + $(stat -f%z "$avif") ))
-		(( converted++ ))
+		converted=$(( converted + 1 ))
 	fi
 done
 saved=$(( orig_size - avif_size ))
