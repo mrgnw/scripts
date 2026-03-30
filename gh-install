@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEST="${HOME}/.local/bin"
+
+usage() {
+	echo "Install a binary from GitHub releases"
+	echo ""
+	echo "Usage: gh-install <owner/repo> <asset-pattern> [binary-name]"
+	echo ""
+	echo "  asset-pattern  Glob for the release asset filename (use * for version)"
+	echo "  binary-name    Name of the binary inside the archive (default: repo name)"
+	echo ""
+	echo "Examples:"
+	echo "  gh-install orf/gping 'gping-*-aarch64-apple-darwin.tar.gz'"
+	echo "  gh-install helix-editor/helix 'helix-*-aarch64-macos.tar.xz' hx"
+	echo "  gh-install Schniz/fnm 'fnm-macos.zip' fnm"
+	exit 1
+}
+
+[[ $# -lt 2 ]] && usage
+
+REPO="$1"
+PATTERN="$2"
+BINARY="${3:-$(basename "$REPO")}"
+
+VER=$(curl -sI "https://github.com/${REPO}/releases/latest" | grep -i ^location | sed 's|.*/tag/||;s/\r//;s/^v//')
+[[ -z "$VER" ]] && echo "Could not detect latest version for ${REPO}" && exit 1
+echo "Latest: ${REPO} ${VER}"
+
+FILENAME="${PATTERN//\*/$VER}"
+URL="https://github.com/${REPO}/releases/download/${VER}/${FILENAME}"
+
+# some repos tag with v prefix
+if ! curl -sfIo /dev/null "$URL"; then
+	URL="https://github.com/${REPO}/releases/download/v${VER}/${FILENAME}"
+	curl -sfIo /dev/null "$URL" || { echo "Asset not found: ${FILENAME}"; exit 1; }
+fi
+
+echo "Downloading ${FILENAME}"
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+curl -sL -o "${TMPDIR}/${FILENAME}" "$URL"
+
+mkdir -p "$DEST"
+
+case "$FILENAME" in
+	*.tar.gz|*.tgz)
+		tar xzf "${TMPDIR}/${FILENAME}" -C "$TMPDIR"
+		;;
+	*.tar.xz)
+		tar xJf "${TMPDIR}/${FILENAME}" -C "$TMPDIR"
+		;;
+	*.zip)
+		unzip -o "${TMPDIR}/${FILENAME}" -d "$TMPDIR" >/dev/null
+		;;
+	*)
+		chmod +x "${TMPDIR}/${FILENAME}"
+		mv "${TMPDIR}/${FILENAME}" "${DEST}/${BINARY}"
+		echo "Installed ${BINARY} to ${DEST}/${BINARY}"
+		exit 0
+		;;
+esac
+
+BIN=$(find "$TMPDIR" -name "$BINARY" -type f | head -1)
+[[ -z "$BIN" ]] && echo "Could not find '${BINARY}' in archive" && ls -R "$TMPDIR" && exit 1
+
+chmod +x "$BIN"
+mv "$BIN" "${DEST}/${BINARY}"
+echo "Installed ${BINARY} to ${DEST}/${BINARY}"
