@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEST="${HOME}/.local/bin"
+DEST="${DEST:-$HOME/.local/bin}"
 
 usage() {
 	echo "Install a binary from GitHub releases"
