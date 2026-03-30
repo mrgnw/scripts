@@ -6,6 +6,7 @@ usage() {
     echo "Prints glob patterns one per line for use in scripts." >&2
     echo >&2
     echo "  images  — raster images, raw formats, and modern compressed formats" >&2
+    echo "  raw     — camera raw formats (arw, cr2, dng, nef, etc.)" >&2
     echo "  videos  — common video container formats" >&2
     echo "  media   — both images and videos" >&2
     echo >&2
@@ -19,6 +20,12 @@ usage() {
     exit 1
 }
 
+print_raw() {
+    print -l \
+        "*.arw" "*.cr2" "*.cr3" "*.dng" "*.nef" \
+        "*.orf" "*.raf" "*.raw" "*.rw2" "*.pef" "*.srw" "*.x3f"
+}
+
 print_images() {
     print -l \
         "*.jpg" "*.jpeg" \
@@ -27,8 +34,8 @@ print_images() {
         "*.webp" "*.avif" \
         "*.heic" "*.heif" \
         "*.jxl" \
-        "*.arw" "*.dng" "*.raw" \
         "*.psd"
+    print_raw
 }
 
 print_videos() {
@@ -45,6 +52,7 @@ print_videos() {
 # Parse type
 case "${1:-}" in
     images|img|i)       type=images ;;
+    raw|r)              type=raw ;;
     videos|video|vid|v) type=videos ;;
     media|all)          type=media ;;
     *)                  usage ;;
@@ -69,6 +77,7 @@ done
 emit() {
     case "$type" in
         images) print_images ;;
+        raw)    print_raw ;;
         videos) print_videos ;;
         media)  print_images; print_videos ;;
     esac
