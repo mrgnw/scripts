@@ -1,8 +1,23 @@
 #!/bin/bash
 
+SUPPORTED_RE='\.(jpe?g|png|apng|gif|exr|ppm|pnm|pfm|pam|pgx)$'
+
+convert_if_needed() {
+	local input="$1"
+	if echo "$input" | grep -iqE "$SUPPORTED_RE"; then
+		echo "$input"
+		return
+	fi
+	local tmp="${TMPDIR:-/tmp}/jxl-$$-$(basename "${input%.*}").png"
+	sips -s format png "$input" --out "$tmp" >/dev/null 2>&1 || { echo "Failed to convert $input" >&2; exit 1; }
+	echo "$tmp"
+}
+
 if [ $# -eq 1 ]; then
-    base="${1%.*}"
-    cjxl "$1" "${base}.jxl"
+	base="${1%.*}"
+	input="$(convert_if_needed "$1")"
+	[ "$input" != "$1" ] && trap 'rm -f "$input"' EXIT
+	cjxl "$input" "${base}.jxl"
 else
-    cjxl "$@"
+	cjxl "$@"
 fi
