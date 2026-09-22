@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Remove *exited* containers from the inactive local Huly and Teable stacks.
+#
+# This intentionally never removes volumes, images, networks, or running
+# containers. It is a dry run unless --apply is supplied.
+
+set -euo pipefail
+
+readonly docker_bin="${DOCKER_BIN:-docker}"
+readonly -a projects=(huly_v7 teable)
+
+apply=false
+
+usage() {
+	cat <<'EOF'
+Usage: docker-clean-huly-teable [--apply]
+
+List exited Docker Compose containers belonging to the Huly (huly_v7) and
+Teable (teable) projects. This is a dry run by default.
+
+  --apply    remove the listed containers
+  -h, --help show this help
+
+Only containers whose current Docker status is "exited" and whose Compose
+project label exactly matches huly_v7 or teable are selected. --apply uses
+"docker container rm" without --force or --volumes, so Docker will not remove
+running containers, volumes, images, or networks.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--apply) apply=true ;;
+		-h|--help) usage; exit 0 ;;
+		*)
+			echo "error: unknown argument: $1" >&2
+			usage >&2
+			exit 2
+			;;
+	esac
+	shift
+done
+
+if ! command -v "$docker_bin" >/dev/null 2>&1; then
+	echo "error: Docker command not found: $docker_bin" >&2
+	exit 127
+fi
+
+container_ids=()
+for project in "${projects[@]}"; do
+	while IFS= read -r container_id; do
+		[[ -n "$container_id" ]] && container_ids+=("$container_id")
+	done < <("$docker_bin" ps -aq \
+		--filter status=exited \
+		--filter "label=com.docker.compose.project=$project")
+done
+
+if [[ ${#container_ids[@]} -eq 0 ]]; then
+	echo "No exited Huly or Teable containers found."
+	exit 0
+fi
+
+echo "Exited containers selected by exact Compose project label:"
+for project in "${projects[@]}"; do
+	"$docker_bin" ps -a --filter status=exited \
+		--filter "label=com.docker.compose.project=$project" \
+		--format '{{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Image}}'
+done
+
+if ! "$apply"; then
+	echo "Dry run — re-run with --apply to remove these containers."
+	exit 0
+fi
+
+echo "Removing ${#container_ids[@]} exited container(s); volumes, images, and networks are preserved."
+"$docker_bin" container rm "${container_ids[@]}"
