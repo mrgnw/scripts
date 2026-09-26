@@ -92,6 +92,7 @@ Delete Xcode simulator runtimes and devices when not in use, re-download when ne
 
 ```sh
 scripts/xcode-sims off
-scripts/xcode-sims on iOS visionOS
+scripts/xcode-sims on
+scripts/xcode-sims on visionOS
 scripts/xcode-sims status
 ```
