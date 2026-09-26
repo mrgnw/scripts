@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+	off)
+		xcrun simctl runtime delete all
+		xcrun simctl delete unavailable
+		;;
+	on)
+		shift
+		[ $# -eq 0 ] && set -- iOS
+		for platform in "$@"; do
+			xcodebuild -downloadPlatform "$platform"
+		done
+		;;
+	'' | status)
+		xcrun simctl runtime list
+		;;
+	*)
+		echo 'usage: xcode-sims [status | off | on [iOS|visionOS|watchOS|tvOS ...]]' >&2
+		exit 1
+		;;
+esac
