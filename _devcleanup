@@ -214,7 +214,7 @@ def delete_directories(dirs_to_delete: List[DirectorySize]) -> None:
 	console.print("[bold green]✓ Processing complete![/bold green]")
 
 
-def main():
+def clean_dirs():
 	root = Path.cwd()
 
 	if not root.exists():
@@ -285,6 +285,30 @@ def main():
 
 	# Delete
 	delete_directories(selected)
+
+
+def simulator_runtimes_summary() -> str | None:
+	if shutil.which("xcrun") is None:
+		return None
+	result = subprocess.run(["xcrun", "simctl", "runtime", "list"], capture_output=True, text=True)
+	for line in result.stdout.splitlines():
+		if line.startswith("Total Disk Images:") and not line.startswith("Total Disk Images: 0"):
+			return line.removeprefix("Total Disk Images: ")
+	return None
+
+
+def offer_xcode_sims() -> None:
+	summary = simulator_runtimes_summary()
+	if summary is None:
+		return
+	console.print()
+	if questionary.confirm(f"Delete Xcode simulator runtimes? {summary}", default=False).ask():
+		subprocess.run(["xcode-sims", "off"], check=True)
+
+
+def main():
+	clean_dirs()
+	offer_xcode_sims()
 
 
 if __name__ == "__main__":
