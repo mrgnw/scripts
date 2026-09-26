@@ -4,7 +4,7 @@ set -eu
 case "${1:-}" in
 	off)
 		xcrun simctl runtime delete all
-		xcrun simctl delete unavailable
+		xcrun simctl delete all
 		;;
 	on)
 		shift
