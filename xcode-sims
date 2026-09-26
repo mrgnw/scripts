@@ -8,7 +8,10 @@ case "${1:-}" in
 		;;
 	on)
 		shift
-		[ $# -eq 0 ] && set -- iOS
+		if [ $# -eq 0 ]; then
+			set -- $(printf '%s\n' iOS visionOS watchOS tvOS | fzf --multi --prompt 'download (tab to pick several): ')
+		fi
+		[ $# -gt 0 ] || exit 1
 		for platform in "$@"; do
 			xcodebuild -downloadPlatform "$platform"
 		done
