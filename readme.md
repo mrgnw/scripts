@@ -85,3 +85,13 @@ svc logs ttyd      # Show logs
 - Production-like services (ttyd, reverse proxies)
 
 Both can coexist without conflict - use the right tool for each job.
+
+## xcode-sims
+
+Delete Xcode simulator runtimes and devices when not in use, re-download when needed.
+
+```sh
+scripts/xcode-sims off
+scripts/xcode-sims on iOS visionOS
+scripts/xcode-sims status
+```
