@@ -1,0 +1,3 @@
+#!/usr/bin/env zsh
+
+exec networkQuality -M ${1:-10}

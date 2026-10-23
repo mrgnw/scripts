@@ -1,0 +1,12 @@
+#!/usr/bin/env zsh
+
+MINI_HOST=mini
+MINI_PORT=7391
+PHASE_SECONDS=${1:-5}
+
+if [[ $(hostname -s) == $MINI_HOST ]]; then
+	echo "on $MINI_HOST, running regular speed test"
+	exec speed
+fi
+
+exec gospeedtest --server http://$MINI_HOST:$MINI_PORT --duration ${PHASE_SECONDS}s
