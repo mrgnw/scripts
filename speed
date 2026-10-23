@@ -1,3 +1,18 @@
 #!/usr/bin/env zsh
 
-exec networkQuality -M ${1:-10}
+MINI_HOST=mini
+MINI_PORT=7391
+SECONDS_PER_TEST=${1:-10}
+
+echo "internet"
+networkQuality -M $SECONDS_PER_TEST
+
+if [[ $(hostname -s) == $MINI_HOST ]]; then
+	echo "on $MINI_HOST, skipping $MINI_HOST test"
+	exit 0
+fi
+
+echo "\n$MINI_HOST"
+json=()
+[[ -t 1 ]] || json=(--json)
+gospeedtest --server http://$MINI_HOST:$MINI_PORT --duration $((SECONDS_PER_TEST / 2))s $json
