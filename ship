@@ -27,7 +27,11 @@ def candidates() -> dict[str, Path]:
 
 
 def shippable() -> dict[str, Path]:
-	return {name: d for name, d in sorted(candidates().items()) if has_ship(d)}
+	apps: dict[str, Path] = {}
+	for name, directory in sorted(candidates().items()):
+		if has_ship(directory) and directory not in apps.values():
+			apps[name] = directory
+	return apps
 
 
 def run(directory: Path) -> int:
