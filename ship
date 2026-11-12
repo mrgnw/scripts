@@ -1,0 +1,56 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# ///
+# Usage: ship <app>   runs `pnpm ship` in that app's checkout (~/dev/<app>, or a pitchfork daemon's dir)
+#        ship         runs `pnpm ship` here, or lists the apps that have one
+import json
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+CONFIG = Path('~/.config/pitchfork/config.toml').expanduser()
+DEV = Path('~/dev').expanduser()
+
+
+def has_ship(directory: Path) -> bool:
+	package = directory / 'package.json'
+	return package.is_file() and 'ship' in json.loads(package.read_text()).get('scripts', {})
+
+
+def candidates() -> dict[str, Path]:
+	daemons = tomllib.loads(CONFIG.read_text()).get('daemons', {})
+	configured = {name: Path(d['dir']).expanduser() for name, d in daemons.items() if d.get('dir')}
+	checkouts = {d.name: d for d in DEV.iterdir() if d.is_dir() and not d.name.startswith(('.', '_'))}
+	return checkouts | configured
+
+
+def shippable() -> dict[str, Path]:
+	return {name: d for name, d in sorted(candidates().items()) if has_ship(d)}
+
+
+def run(directory: Path) -> int:
+	print(f'ship: {directory}', flush=True)
+	return subprocess.run(['pnpm', 'ship'], cwd=directory).returncode
+
+
+def main() -> int:
+	if len(sys.argv) > 2:
+		print('usage: ship [app]', file=sys.stderr)
+		return 2
+	apps = shippable()
+	if len(sys.argv) == 2:
+		app = sys.argv[1]
+		if app not in apps:
+			print(f'no app "{app}" with a ship script. Apps: {", ".join(apps)}', file=sys.stderr)
+			return 2
+		return run(apps[app])
+	if has_ship(Path.cwd()):
+		return run(Path.cwd())
+	print('Apps with a ship script:\n' + '\n'.join(f'  {name}  {d}' for name, d in apps.items()))
+	return 0
+
+
+if __name__ == '__main__':
+	sys.exit(main())
