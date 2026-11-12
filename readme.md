@@ -96,3 +96,47 @@ scripts/xcode-sims on
 scripts/xcode-sims on visionOS
 scripts/xcode-sims status
 ```
+
+## ship
+
+Put the latest main live for any app, the same way every time. `ship` runs the app's own `pnpm ship`.
+
+```sh
+ship social
+```
+
+Run from anywhere. The app is its folder `~/dev/<app>`, or the `dir` of a pitchfork daemon with that name.
+
+```sh
+cd ~/dev/social
+ship
+```
+
+With no argument it runs the `ship` script of the project in the current folder (not parent folders). Anywhere else it lists the apps that have a `ship` script and ships nothing.
+
+`ship` never merges anything. It deploys what is on main.
+
+### Give an app a ship script
+
+Cloudflare apps:
+
+```json
+"ship": "pnpm build && wrangler deploy"
+```
+
+Apps that pitchfork runs on this machine, with the daemon id from `pitchfork list`:
+
+```json
+"ship": "ship-pitchfork global/social"
+```
+
+`ship-pitchfork <daemon id>` stops unless the checkout is on `main`, clean, and in sync with `origin/main`. Then it runs, in order:
+
+```sh
+git pull --ff-only origin main
+pnpm install --frozen-lockfile
+pnpm build
+pitchfork restart global/social
+```
+
+`pitchfork restart` only restarts the process. The pull and build above are what bring in new code, because the app serves its `build/` folder.
